@@ -20,7 +20,7 @@
 #include <SPI.h>
 #include <Wire.h>
 
-#include <LCDI2C_Multilingual.h>
+#include <LCDI2C_Generic.h>
 LCDI2C_Generic lcd(0x27, 20, 4); // I2C address: 0x27; Display size: 20x4
 
 // #include <LiquidCrystal.h>
@@ -148,6 +148,8 @@ void resetSystem() {
 }
 
 void setup() {
+
+  // Serial.begin(9600); // uncomment to enable serial debug output
 
   pinMode(CODE_BUTTON, INPUT);
   pinMode(CLEAR_BUTTON, INPUT);
