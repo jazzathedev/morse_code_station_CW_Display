@@ -32,12 +32,23 @@ LCDI2C_Generic lcd(0x27, 20, 4); // I2C address: 0x27; Display size: 20x4
 #define VER 1
 #define SUBVER 6
 
+// Stringize VER/SUBVER so the banner can show "v1.6" without hardcoding it.
+#define STR_HELPER(x) #x
+#define STR(x) STR_HELPER(x)
+#define VERSION_STR "v" STR(VER) "." STR(SUBVER)
+
 #define BUZZER_PIN 2
 #define LED_PIN 4
 #define CODE_BUTTON 3
 #define CLEAR_BUTTON 5 // 26Mar2025 Change
 
-#define MAX_BUTTON_PRESS_TIMES 6
+// Max symbols (dots/dashes) captured per character. Must cover the longest code
+// we decode: 7 for '$' (...-..-). Most letters/digits are <= 5, punctuation 6-7.
+#define MAX_BUTTON_PRESS_TIMES 8
+
+// How many of those symbols the live dot/dash indicator shows. Bounded by the
+// columns available to its right (dotDashActivityX .. last column).
+#define DOTDASH_DISPLAY_CELLS 6
 
 // define INACTIVITY_TIME 600000 //10 minutes, 600 seconds, 600k milliseconds
 // #define INACTIVITY_TIME 60000 //1 minute, 60 seconds, 60k milliseconds
@@ -90,7 +101,7 @@ void showDotDashActivity() {
 
   lcd.setCursor((dotDashActivityX), dotDashActivityY);
   // lcd.print("CW");
-  for (int i = 0; i < MAX_BUTTON_PRESS_TIMES; i++) {
+  for (int i = 0; i < DOTDASH_DISPLAY_CELLS; i++) {
     if (isDot(buttonPressTimes[i])) {
       lcd.print(".");
     } else if (isDash((buttonPressTimes[i]))) {
@@ -106,7 +117,7 @@ void welcomeBanner(int waitDelay) {
 
   char banner1[] = " -- SCOUTS WA --";
   char banner2[] = " Radio & Tech Team";
-  char banner3[] = "May 2025 - v1.4 cw";
+  char banner3[] = VERSION_STR " cw";
   char banner4[] = "By VK6TU/VK6XM";
   lcd.clear();
   lcd.setCursor(0, 0);
@@ -163,17 +174,25 @@ void setup() {
   resetSystem();
 }
 
+// Write a row buffer to the LCD verbatim, one byte per column. Bypasses the
+// library's UTF-8 decoding so raw ROM codes (e.g. the 0xFF block) render as-is.
+void writeRow(const char *s) {
+  while (*s)
+    lcd.write((uint8_t)*s++);
+}
+
 void displayChar(char DisplayChar) {
   // we will display on the last row, and scroll up row 3-> 2, 2->1
   // when we scroll up, we will blank the bottom row.
 
-  if (initialChar) {     // needed to stop initial "?" showing up
+  if (initialChar) {     // needed to stop initial char showing up
     initialChar = false; // reset flag
     return;              // return - we're not showing this character
   }
 
-  lcd.setCursor(DisplayPos, 3); // put the cursor in the right spot on Row 4
-  lcd.print(DisplayChar);       // display the single character
+  lcd.setCursor(DisplayPos, 3);     // put the cursor in the right spot on Row 4
+  lcd.write((uint8_t)DisplayChar);  // display the single character (raw, so the
+                                    // 0xFF error block renders correctly)
 
   row3[DisplayPos] = DisplayChar; // record the character in it's position
   DisplayPos++;                   // move the position across one.
@@ -195,13 +214,13 @@ void displayChar(char DisplayChar) {
     strcpy(row3, blankrow);
 
     lcd.setCursor(0, 1);
-    lcd.printstr(row1); // display row1 (has contents of row2)
+    writeRow(row1); // display row1 (has contents of row2)
 
     lcd.setCursor(0, 2);
-    lcd.printstr(row2); // display row2 (has contents of row3)
+    writeRow(row2); // display row2 (has contents of row3)
 
     lcd.setCursor(0, 3);
-    lcd.printstr(row3); // display a blank line
+    writeRow(row3); // display a blank line
 
     lcd.setCursor(0, 3); // put the cursor back at the beginning of row 4
   }
@@ -291,8 +310,9 @@ void codeButtonReleased() {
     // if the dotDash buffer is full, then everything needs to be reset to ZERO
     // time.
     //  AND the dotDash Display needs to be reset as well.
-    if (bptIndex == MAX_BUTTON_PRESS_TIMES) {
+    if (bptIndex >= MAX_BUTTON_PRESS_TIMES) {
       resetButtonPressTimes();
+      bptIndex = 0; // also reset the index, else the next press writes OOB
       // clearDotDashActivity();  //clear up the Top Right display
     }
   }
