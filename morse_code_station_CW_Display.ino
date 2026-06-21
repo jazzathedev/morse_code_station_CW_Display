@@ -23,6 +23,8 @@
 #include <LCDI2C_Generic.h>
 LCDI2C_Generic lcd(0x27, 20, 4); // I2C address: 0x27; Display size: 20x4
 
+#include "morse.h" // dot/dash classification + decodeMorse() lookup
+
 // #include <LiquidCrystal.h>
 //  Pin assignments -->  (RS,RW, E, D4, D5, D6, D7)
 //  LiquidCrystal lcd(2,255, 3, 4, 5, 6, 7);
@@ -74,14 +76,12 @@ bool newWord;
 // bool initialChar = true;
 bool initialChar = false;
 
-// Time range of a dot in milliseconds
-const unsigned int dotTimeMillisMin = 40;
-const unsigned int dotTimeMillisMax = 170;
-
 // Array to store the times of the code button presses
 unsigned long buttonPressTimes[MAX_BUTTON_PRESS_TIMES];
 int bptIndex;
 bool keyStroke = false;
+
+// dot/dash timing thresholds (dotTimeMillisMin/Max) live in morse.cpp
 
 // Reset Nano Function
 void (*resetFunc)(void) = 0;
@@ -345,7 +345,7 @@ void decodeButtonPresses() {
   Serial.print("   ");
   /* DEBUG TO SERIAL */
 
-  char c = decodeMsg();
+  char c = decodeMorse(buttonPressTimes, bptIndex);
   displayChar(
       c); // vk6XM change -put the character on screen, and scroll if required.
   Serial.print(c);  // DEBUG
@@ -356,149 +356,4 @@ void decodeButtonPresses() {
   // clearDotDashActivity();  //clear up the Top Right display
 
   keyStroke = true;
-}
-
-bool isDot(unsigned long t) {
-  if (t >= dotTimeMillisMin && t <= dotTimeMillisMax)
-    return true;
-  return false;
-}
-bool isDash(unsigned long t) {
-  if (t > dotTimeMillisMax)
-    return true;
-  return false;
-}
-
-char decodeMsg() {
-  char c = '?';
-  if (isDot(buttonPressTimes[0]) && isDash(buttonPressTimes[1]) &&
-      buttonPressTimes[2] == 0)
-    c = 'A';
-  else if (isDash(buttonPressTimes[0]) && isDot(buttonPressTimes[1]) &&
-           isDot(buttonPressTimes[2]) && isDot(buttonPressTimes[3]) &&
-           buttonPressTimes[4] == 0)
-    c = 'B';
-  else if (isDash(buttonPressTimes[0]) && isDot(buttonPressTimes[1]) &&
-           isDash(buttonPressTimes[2]) && isDot(buttonPressTimes[3]) &&
-           buttonPressTimes[4] == 0)
-    c = 'C';
-  else if (isDash(buttonPressTimes[0]) && isDot(buttonPressTimes[1]) &&
-           isDot(buttonPressTimes[2]) && buttonPressTimes[3] == 0)
-    c = 'D';
-  else if (isDot(buttonPressTimes[0]) && buttonPressTimes[1] == 0)
-    c = 'E';
-  else if (isDot(buttonPressTimes[0]) && isDot(buttonPressTimes[1]) &&
-           isDash(buttonPressTimes[2]) && isDot(buttonPressTimes[3]) &&
-           buttonPressTimes[4] == 0)
-    c = 'F';
-  else if (isDash(buttonPressTimes[0]) && isDash(buttonPressTimes[1]) &&
-           isDot(buttonPressTimes[2]) && buttonPressTimes[3] == 0)
-    c = 'G';
-  else if (isDot(buttonPressTimes[0]) && isDot(buttonPressTimes[1]) &&
-           isDot(buttonPressTimes[2]) && isDot(buttonPressTimes[3]) &&
-           buttonPressTimes[4] == 0)
-    c = 'H';
-  else if (isDot(buttonPressTimes[0]) && isDot(buttonPressTimes[1]) &&
-           buttonPressTimes[2] == 0)
-    c = 'I';
-  else if (isDot(buttonPressTimes[0]) && isDash(buttonPressTimes[1]) &&
-           isDash(buttonPressTimes[2]) && isDash(buttonPressTimes[3]) &&
-           buttonPressTimes[4] == 0)
-    c = 'J';
-  else if (isDash(buttonPressTimes[0]) && isDot(buttonPressTimes[1]) &&
-           isDash(buttonPressTimes[2]) && buttonPressTimes[3] == 0)
-    c = 'K';
-  else if (isDot(buttonPressTimes[0]) && isDash(buttonPressTimes[1]) &&
-           isDot(buttonPressTimes[2]) && isDot(buttonPressTimes[3]) &&
-           buttonPressTimes[4] == 0)
-    c = 'L';
-  else if (isDash(buttonPressTimes[0]) && isDash(buttonPressTimes[1]) &&
-           buttonPressTimes[2] == 0)
-    c = 'M';
-  else if (isDash(buttonPressTimes[0]) && isDot(buttonPressTimes[1]) &&
-           buttonPressTimes[2] == 0)
-    c = 'N';
-  else if (isDash(buttonPressTimes[0]) && isDash(buttonPressTimes[1]) &&
-           isDash(buttonPressTimes[2]) && buttonPressTimes[3] == 0)
-    c = 'O';
-  else if (isDot(buttonPressTimes[0]) && isDash(buttonPressTimes[1]) &&
-           isDash(buttonPressTimes[2]) && isDot(buttonPressTimes[3]) &&
-           buttonPressTimes[4] == 0)
-    c = 'P';
-  else if (isDash(buttonPressTimes[0]) && isDash(buttonPressTimes[1]) &&
-           isDot(buttonPressTimes[2]) && isDash(buttonPressTimes[3]) &&
-           buttonPressTimes[4] == 0)
-    c = 'Q';
-  else if (isDot(buttonPressTimes[0]) && isDash(buttonPressTimes[1]) &&
-           isDot(buttonPressTimes[2]) && buttonPressTimes[3] == 0)
-    c = 'R';
-  else if (isDot(buttonPressTimes[0]) && isDot(buttonPressTimes[1]) &&
-           isDot(buttonPressTimes[2]) && buttonPressTimes[3] == 0)
-    c = 'S';
-  else if (isDash(buttonPressTimes[0]) && buttonPressTimes[1] == 0)
-    c = 'T';
-  else if (isDot(buttonPressTimes[0]) && isDot(buttonPressTimes[1]) &&
-           isDash(buttonPressTimes[2]) && buttonPressTimes[3] == 0)
-    c = 'U';
-  else if (isDot(buttonPressTimes[0]) && isDot(buttonPressTimes[1]) &&
-           isDot(buttonPressTimes[2]) && isDash(buttonPressTimes[3]) &&
-           buttonPressTimes[4] == 0)
-    c = 'V';
-  else if (isDot(buttonPressTimes[0]) && isDash(buttonPressTimes[1]) &&
-           isDash(buttonPressTimes[2]) && buttonPressTimes[3] == 0)
-    c = 'W';
-  else if (isDash(buttonPressTimes[0]) && isDot(buttonPressTimes[1]) &&
-           isDot(buttonPressTimes[2]) && isDash(buttonPressTimes[3]) &&
-           buttonPressTimes[4] == 0)
-    c = 'X';
-  else if (isDash(buttonPressTimes[0]) && isDot(buttonPressTimes[1]) &&
-           isDash(buttonPressTimes[2]) && isDash(buttonPressTimes[3]) &&
-           buttonPressTimes[4] == 0)
-    c = 'Y';
-  else if (isDash(buttonPressTimes[0]) && isDash(buttonPressTimes[1]) &&
-           isDot(buttonPressTimes[2]) && isDot(buttonPressTimes[3]) &&
-           buttonPressTimes[4] == 0)
-    c = 'Z';
-  else if (isDot(buttonPressTimes[0]) && isDash(buttonPressTimes[1]) &&
-           isDash(buttonPressTimes[2]) && isDash(buttonPressTimes[3]) &&
-           isDash(buttonPressTimes[4]))
-    c = '1';
-  else if (isDot(buttonPressTimes[0]) && isDot(buttonPressTimes[1]) &&
-           isDash(buttonPressTimes[2]) && isDash(buttonPressTimes[3]) &&
-           isDash(buttonPressTimes[4]))
-    c = '2';
-  else if (isDot(buttonPressTimes[0]) && isDot(buttonPressTimes[1]) &&
-           isDot(buttonPressTimes[2]) && isDash(buttonPressTimes[3]) &&
-           isDash(buttonPressTimes[4]))
-    c = '3';
-  else if (isDot(buttonPressTimes[0]) && isDot(buttonPressTimes[1]) &&
-           isDot(buttonPressTimes[2]) && isDot(buttonPressTimes[3]) &&
-           isDash(buttonPressTimes[4]))
-    c = '4';
-  else if (isDot(buttonPressTimes[0]) && isDot(buttonPressTimes[1]) &&
-           isDot(buttonPressTimes[2]) && isDot(buttonPressTimes[3]) &&
-           isDot(buttonPressTimes[4]))
-    c = '5';
-  else if (isDash(buttonPressTimes[0]) && isDot(buttonPressTimes[1]) &&
-           isDot(buttonPressTimes[2]) && isDot(buttonPressTimes[3]) &&
-           isDot(buttonPressTimes[4]))
-    c = '6';
-  else if (isDash(buttonPressTimes[0]) && isDash(buttonPressTimes[1]) &&
-           isDot(buttonPressTimes[2]) && isDot(buttonPressTimes[3]) &&
-           isDot(buttonPressTimes[4]))
-    c = '7';
-  else if (isDash(buttonPressTimes[0]) && isDash(buttonPressTimes[1]) &&
-           isDash(buttonPressTimes[2]) && isDot(buttonPressTimes[3]) &&
-           isDot(buttonPressTimes[4]))
-    c = '8';
-  else if (isDash(buttonPressTimes[0]) && isDash(buttonPressTimes[1]) &&
-           isDash(buttonPressTimes[2]) && isDash(buttonPressTimes[3]) &&
-           isDot(buttonPressTimes[4]))
-    c = '9';
-  else if (isDash(buttonPressTimes[0]) && isDash(buttonPressTimes[1]) &&
-           isDash(buttonPressTimes[2]) && isDash(buttonPressTimes[3]) &&
-           isDash(buttonPressTimes[4]))
-    c = '0';
-
-  return c;
 }
