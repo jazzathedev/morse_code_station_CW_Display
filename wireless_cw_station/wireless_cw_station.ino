@@ -20,6 +20,7 @@
 #include <SPI.h>
 #include "RF24.h"
 #include <Wire.h>
+#include <EEPROM.h>
 #include <string.h>
 
 #include "morse.h" // dot/dash classification + decodeMorse*() lookups
@@ -60,17 +61,26 @@ LCDI2C_Generic lcd(LCD_I2C_ADDR, LCD_COLS, LCD_ROWS);
 
 RF24 radio(RADIO_CE_PIN, RADIO_CSN_PIN);
 
-// Set this to 1 on one unit and 2 on the other before flashing. It selects the
-// radio pipes and sidetone pitches so the two units pair up.
-#define BOARD_NUMBER 1
+// The unit number (which board this is) is chosen at boot by tapping the key and
+// stored in EEPROM - see selectUnitNumber(). It selects the radio pipes and
+// sidetone pitches so the two units pair up. The two units must be different
+// numbers (1 and 2) to talk.
+#define DEFAULT_UNIT 1     // used when EEPROM holds nothing valid
+#define MAX_UNITS 2        // tap-cycle wraps 1 -> 2 -> ... -> 1
+#define UNIT_EEPROM_ADDR 0 // byte offset where the unit number is stored
+// The chooser shares the start-up banner's window (BANNER_DISPLAY_TIME) - tap
+// during the banner to cycle the unit, no extra boot delay.
+
+uint8_t unitNumber = DEFAULT_UNIT; // this board's number, set in selectUnitNumber()
 
 const byte ADDRESS[][6] = {"pipe1", "pipe2"}; // two-way comms addresses
 #define RADIO_CHANNEL 76                      // 0-83 legal in AU, maps to 2400+N MHz
 
-// Sidetone pitch (Hz). You hear your own key at your unit's pitch and the remote
-// key at theirs, so the two are easy to tell apart.
-#define TONE_LOCAL_HZ (BOARD_NUMBER == 1 ? 600 : 900)
-#define TONE_REMOTE_HZ (BOARD_NUMBER == 1 ? 900 : 600)
+// Sidetone pitch (Hz), derived from unitNumber after selection. You hear your
+// own key at your unit's pitch and the remote key at theirs, so the two are easy
+// to tell apart.
+int toneLocalHz;
+int toneRemoteHz;
 
 // Inter-symbol gap timing (shared with the wired station). Idle past
 // LETTER_GAP_MS ends the current letter; idle past WORD_GAP_MS ends the word.
@@ -179,7 +189,7 @@ void setupRadio()
   Serial.println("Radio init ok");
 
   // Board 1 writes to pipe1 and reads pipe2; board 2 is the mirror image.
-  if (BOARD_NUMBER == 1)
+  if (unitNumber == 1)
   {
     radio.openWritingPipe(ADDRESS[0]);
     radio.openReadingPipe(1, ADDRESS[1]);
@@ -206,7 +216,7 @@ void showHeader()
 {
   lcd.setCursor(0, HEADER_ROW);
   lcd.print("U");
-  lcd.print(BOARD_NUMBER);
+  lcd.print(unitNumber);
   lcd.print(modeDecoded ? " CW TEXT" : " CW");
   lcd.print("       "); // pad up to the live indicator at column 14
 }
@@ -327,17 +337,83 @@ void welcomeBanner(int waitDelay)
   lcd.print(" Wireless CW");
   lcd.setCursor(0, 2);
   lcd.print(VERSION_STR "  Unit ");
-  lcd.print(BOARD_NUMBER);
+  lcd.print(unitNumber);
   lcd.setCursor(0, 3);
   lcd.print("By VK6TU/VK6XM");
   delay(waitDelay);
   lcd.clear();
 }
 
-void resetStation()
+// Boot banner that doubles as the unit chooser - shows the unit number and the
+// "tap key" hint. Redrawn each time the number changes.
+void drawBootBanner()
 {
-  welcomeBanner(BANNER_DISPLAY_TIME);
+  lcd.clear();
+  lcd.setCursor(0, 0);
+  lcd.print(" -- SCOUTS WA --");
+  lcd.setCursor(0, 1);
+  lcd.print(" Wireless CW " VERSION_STR);
+  lcd.setCursor(0, 2);
+  lcd.print(" Unit ");
+  lcd.print(unitNumber);
+  lcd.setCursor(0, 3);
+  lcd.print("Tap key to change");
+}
 
+// Boot-time unit chooser. Loads the saved unit from EEPROM, then for the banner
+// window each key tap cycles the number (1 -> 2 -> ... -> 1). The result is saved
+// back to EEPROM so it sticks across power cycles, and confirmed with a beep per
+// unit so it's readable even with no display. Runs before the radio listens, so
+// taps don't transmit. Shares BANNER_DISPLAY_TIME - no extra boot delay.
+void selectUnitNumber()
+{
+  unitNumber = EEPROM.read(UNIT_EEPROM_ADDR);
+  if (unitNumber < 1 || unitNumber > MAX_UNITS)
+  {
+    unitNumber = DEFAULT_UNIT; // fresh/invalid EEPROM (e.g. 0xFF)
+  }
+  uint8_t startUnit = unitNumber;
+
+  drawBootBanner();
+
+  // Wait for the banner window to elapse with no tap. Each tap cycles the number
+  // and restarts the window, so it confirms 3s after your last press.
+  bool prevKey = HIGH; // active-low key, idle HIGH
+  unsigned long lastActivity = millis();
+  while (millis() - lastActivity < BANNER_DISPLAY_TIME)
+  {
+    bool k = digitalRead(KEY_PIN);
+    if (prevKey == HIGH && k == LOW) // falling edge = a tap
+    {
+      unitNumber = (unitNumber % MAX_UNITS) + 1; // cycle 1..MAX_UNITS
+      tone(BUZZER_PIN, 880, 60);                 // short tap blip
+      drawBootBanner();
+      lastActivity = millis(); // restart the window from this tap
+      delay(50);               // debounce the tap
+    }
+    prevKey = k;
+  }
+
+  if (unitNumber != startUnit)
+  {
+    EEPROM.update(UNIT_EEPROM_ADDR, unitNumber); // update() only writes on change
+  }
+
+  // Confirm the landing number: one beep/blink per unit.
+  for (uint8_t i = 0; i < unitNumber; i++)
+  {
+    digitalWrite(CONFIRM_LED_PIN, HIGH);
+    tone(BUZZER_PIN, 660, 120);
+    delay(180);
+    digitalWrite(CONFIRM_LED_PIN, LOW);
+    delay(120);
+  }
+}
+
+// Reset operating state and draw the live screen, without the banner. Used at
+// boot, where the unit chooser has already shown the banner for its window.
+void initStation()
+{
   historyCount = 0;
   patternLen = 0;
   currentPattern[0] = '\0';
@@ -354,6 +430,13 @@ void resetStation()
   showHeader();
   showRxActivity();
   renderHistory();
+}
+
+// Soft restart (clear button): show the banner, then reset state.
+void resetStation()
+{
+  welcomeBanner(BANNER_DISPLAY_TIME);
+  initStation();
 }
 
 void setup()
@@ -376,6 +459,12 @@ void setup()
   lcd.init();
   lcd.backlight();
 
+  // Choose this unit's number (tap the key during the banner), then derive the
+  // sidetone pitches from it before the radio pipes are set up.
+  selectUnitNumber();
+  toneLocalHz = (unitNumber == 1) ? 600 : 900;
+  toneRemoteHz = (unitNumber == 1) ? 900 : 600;
+
   setupRadio();
 
 #if MODE_SWITCH_ENABLED
@@ -383,7 +472,7 @@ void setup()
 #else
   modeDecoded = START_MODE_DECODED;
 #endif
-  resetStation();
+  initStation(); // chooser already showed the banner; just draw the live screen
 }
 
 /* ***********************************************
@@ -456,7 +545,7 @@ void transmitLocalKey()
     if (debouncedButtonState == LOW)
     { // active-low key: LOW = pressed
       digitalWrite(CONFIRM_LED_PIN, HIGH);
-      tone(BUZZER_PIN, TONE_LOCAL_HZ);
+      tone(BUZZER_PIN, toneLocalHz);
     }
     else
     {
@@ -498,7 +587,7 @@ void onRemoteKeyDown()
   rxKeyDownStart = millis();
   lastRxActivity = rxKeyDownStart;
   digitalWrite(STATUS_LED_PIN, HIGH);
-  tone(BUZZER_PIN, TONE_REMOTE_HZ);
+  tone(BUZZER_PIN, toneRemoteHz);
 }
 
 void onRemoteKeyUp()
