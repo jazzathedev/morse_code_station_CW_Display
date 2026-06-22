@@ -176,8 +176,8 @@ void setup() {
   resetSystem();
 }
 
-// Write a row buffer to the LCD verbatim, one byte per column. Bypasses the
-// library's UTF-8 decoding so raw ROM codes (e.g. the 0xFF block) render as-is.
+// Write a row buffer to the LCD one byte per column, bypassing the library's
+// UTF-8 decoding so each stored byte maps to exactly one display cell.
 void writeRow(const char *s) {
   while (*s)
     lcd.write((uint8_t)*s++);
@@ -193,7 +193,7 @@ void displayChar(char ch) {
   }
 
   lcd.setCursor(displayPos, BOTTOM_ROW);
-  lcd.write((uint8_t)ch); // raw write so the 0xFF "unknown" block renders
+  lcd.write((uint8_t)ch); // byte-for-byte write, no UTF-8 decoding (one cell)
 
   row3[displayPos] = ch;
   displayPos++;
