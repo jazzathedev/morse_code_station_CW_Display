@@ -356,6 +356,12 @@ void setup()
   pinMode(CONFIRM_LED_PIN, OUTPUT);
   pinMode(STATUS_LED_PIN, OUTPUT);
 
+  // Bring up I2C with a timeout so a missing, half-plugged or flaky display
+  // can't wedge the bus and freeze the radio. The unit runs fine headless -
+  // writes to an absent LCD are just NACKed and ignored.
+  Wire.begin();
+  Wire.setWireTimeout(25000, true); // 25ms, reset the bus on timeout
+
   lcd.init();
   lcd.backlight();
 
