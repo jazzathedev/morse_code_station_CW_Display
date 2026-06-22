@@ -85,8 +85,10 @@ const byte ADDRESS[][6] = {"pipe1", "pipe2"}; // two-way comms addresses
 // avoid two units keying over each other (half-duplex lockout).
 #define RX_TX_LOCKOUT_MS 3000
 
-// Give up and panic after this many consecutive failed transmits (radio fault).
-#define TX_FAIL_THRESHOLD 3
+// How long panic() flashes the LEDs (and shows RADIO FAULT) before it gives up
+// and returns so the caller can retry. Recoverable - a transient radio glitch
+// or a module that wasn't ready at boot won't brick the unit permanently.
+#define PANIC_BLINK_MS 3000
 
 #define BANNER_DISPLAY_TIME 3000 // 3 seconds
 
@@ -137,17 +139,19 @@ unsigned long timeOfLastReceive = 0;
 unsigned long lastDebounce = 0;
 bool rawButtonState = HIGH; // active-low key: HIGH = released
 bool debouncedButtonState = HIGH;
-int consecutiveTxFailures = 0;
 
 // --- Radio ------------------------------------------------------------------
 
-// Blink both LEDs forever after an unrecoverable radio fault.
+// Flash both LEDs (and show RADIO FAULT) for PANIC_BLINK_MS, then return so the
+// caller can retry. Not a permanent lockup - a radio that comes good recovers.
 void panic()
 {
   lcd.clear();
   lcd.setCursor(0, 0);
   lcd.print("RADIO FAULT");
-  while (true)
+
+  unsigned long start = millis();
+  while (millis() - start < PANIC_BLINK_MS)
   {
     digitalWrite(CONFIRM_LED_PIN, HIGH);
     digitalWrite(STATUS_LED_PIN, HIGH);
@@ -160,7 +164,9 @@ void panic()
 
 void setupRadio()
 {
-  if (!radio.begin())
+  // Keep retrying instead of bricking: panic() flashes for its timeout, then we
+  // loop and try again, so the unit recovers once the module is reachable.
+  while (!radio.begin())
   {
     Serial.println("Radio init FAILED");
     panic();
@@ -196,7 +202,7 @@ void showHeader()
   lcd.setCursor(0, HEADER_ROW);
   lcd.print("U");
   lcd.print(BOARD_NUMBER);
-  lcd.print(modeDecoded ? " TEXT" : " DOTS");
+  lcd.print(modeDecoded ? " CW TEXT" : " CW");
   lcd.print("       "); // pad up to the live indicator at column 14
 }
 
@@ -436,16 +442,10 @@ void transmitLocalKey()
     radio.stopListening(); // leave RX only for the actual transmit
     bool txOk = radio.write(&debouncedButtonState, sizeof(debouncedButtonState));
     radio.startListening();
+    // A failed write just means the peer didn't ack this packet (out of range,
+    // powered off, or RF noise). That's normal operation, not a fault - log it
+    // and carry on; the local sidetone/LED below still track the key.
     Serial.println(txOk ? "TX ok" : "TX FAILED");
-
-    if (txOk)
-    {
-      consecutiveTxFailures = 0;
-    }
-    else if (++consecutiveTxFailures >= TX_FAIL_THRESHOLD)
-    {
-      panic();
-    }
 
     if (debouncedButtonState == LOW)
     { // active-low key: LOW = pressed
