@@ -1,20 +1,17 @@
 /**
- * A Morse code station for the Arduino.
+ * A Morse code station for the Arduino, driving a 20x4 (or 16x2) character LCD.
  *
- * The display is a 20 x 4 or 16 x 2 LCD display and it uses the
- * LiquidCrystal.h LCD librarie:
- * or LCDI2C_Multilingual.h for 12c interface
- * Original Author: Mario Gianota July 2020 using a OLED screen.
- * https://hackaday.io/project/175129-arduino-morse-code-station
- * And improved code https://github.com/grahowe/Morse-Code-Station
+ * A straight key wired to CODE_BUTTON is timed: short presses are dots, long
+ * presses are dashes. Gaps between presses separate letters and words. Decoded
+ * text scrolls up the LCD, and a live dot/dash indicator shows the current
+ * symbol being keyed in the top-right corner.
  *
- * 2024-10-00 LED code changes VK6TU Oct 2024
- * 2024-12-00 Row Display Code - VK6XM Dec 2024
- * 2025-03-26 CW Pause & Clear Display Button - VK6XM_VK6TU
- * 2025-04-28 Fixed timing issue, morse key didn't work after reset. Change
- * BANNER display time, now uses "BANNER_DISPLAY_TIME" constant - VK6XM
- * 2025-05-15 v1.6 Added 0 timeout option to turn off this code. Also, reset LED
- * to OFF when resetting. - VK6XM
+ * Based on Mario Gianota's OLED version (July 2020):
+ *   https://hackaday.io/project/175129-arduino-morse-code-station
+ *   https://github.com/grahowe/Morse-Code-Station
+ *
+ * Credits: original by Mario Gianota; LED, row-display, pause/clear and timing
+ * work by VK6TU and VK6XM; current changes by Jazza.
  */
 
 #include <SPI.h>
@@ -25,9 +22,9 @@ LCDI2C_Generic lcd(0x27, 20, 4); // I2C address: 0x27; Display size: 20x4
 
 #include "morse.h" // dot/dash classification + decodeMorse() lookup
 
+// Wiring for a parallel (non-I2C) LCD instead of the I2C one above:
 // #include <LiquidCrystal.h>
-//  Pin assignments -->  (RS,RW, E, D4, D5, D6, D7)
-//  LiquidCrystal lcd(2,255, 3, 4, 5, 6, 7);
+// LiquidCrystal lcd(2, 255, 3, 4, 5, 6, 7); // (RS, RW, E, D4, D5, D6, D7)
 
 #define VER 1
 #define SUBVER 6
@@ -40,7 +37,7 @@ LCDI2C_Generic lcd(0x27, 20, 4); // I2C address: 0x27; Display size: 20x4
 #define BUZZER_PIN 2
 #define LED_PIN 4
 #define CODE_BUTTON 3
-#define CLEAR_BUTTON 5 // 26Mar2025 Change
+#define CLEAR_BUTTON 5
 
 // Max symbols (dots/dashes) captured per character. Must cover the longest code
 // we decode: 7 for '$' (...-..-). Most letters/digits are <= 5, punctuation 6-7.
@@ -50,64 +47,62 @@ LCDI2C_Generic lcd(0x27, 20, 4); // I2C address: 0x27; Display size: 20x4
 // columns available to its right (dotDashActivityX .. last column).
 #define DOTDASH_DISPLAY_CELLS 6
 
-// define INACTIVITY_TIME 600000 //10 minutes, 600 seconds, 600k milliseconds
-// #define INACTIVITY_TIME 60000 //1 minute, 60 seconds, 60k milliseconds
-// #define INACTIVITY_TIME 0 //if  0 - function is disabled, won't autoreboot.
 #define BANNER_DISPLAY_TIME 3000 // 3 seconds
 
+// Updated on each key press. The inactivity auto-reboot that used this is
+// currently disabled (timeout check in loop() is commented out).
 unsigned long lastActivityTime;
-// const unsigned long inactivityTimeout = 10000; // 10 seconds in milliseconds
-// //v1.5 change const unsigned long inactivityTimeout = INACTIVITY_TIME; // 600
-// seconds in milliseconds  //v1.5 change   //v1.6 DISABLED
 
-/** VK6XM Additional code - row scrolling **/
-// VK6XM - RowCopy code
-//  initially there is no data, but define arrays to hold data.
+// Row-scrolling buffers. Each holds one 20-char display row so the text can be
+// shifted up a line at a time as new characters fill the bottom row.
 #define BLANKROW "                    ";
 char blankrow[] = BLANKROW;
 char row1[] = BLANKROW;
 char row2[] = BLANKROW;
 char row3[] = BLANKROW;
 
-int DisplayPos = 0;
+int DisplayPos = 0; // current column on the bottom row
 int MaxColumns = 20;
 
-// CW Display positions on screen...
-const unsigned int dotDashActivityX = 14; //(X pos --> 15)
-const unsigned int dotDashActivityY = 0;  //(Y pos (ie Row is 1) --> 0)
-/**-----------------------------------**/
+// Top-right screen position for the live dot/dash activity indicator.
+const unsigned int dotDashActivityX = 14;
+const unsigned int dotDashActivityY = 0;
 
+// Key state machine:
+//   codeButtonArmed   - a key-down has started and the timer is running
+//   codeButtonPressed - the key is currently held down
+//   letterDecoded     - the symbols buffered so far have been turned into a char
+//   newWord           - a symbol is pending, so a long gap should insert a space
 bool codeButtonArmed;
 bool codeButtonPressed;
-unsigned long codeTime;
-unsigned long startTime;
-unsigned long lastButtonPressTime;
+unsigned long codeTime;            // duration of the current/last key-down (ms)
+unsigned long startTime;           // millis() when the current key-down began
+unsigned long lastButtonPressTime; // millis() of last key activity, for gap timing
 bool letterDecoded;
 bool newWord;
-// bool initialChar = true;
-bool initialChar = false;
+bool initialChar = false; // suppresses the very first decoded char after reset
 
-// Array to store the times of the code button presses
+// Durations of each key-down in the letter currently being built. bptIndex is
+// the next free slot; decodeMorse() reads buttonPressTimes[0..bptIndex).
 unsigned long buttonPressTimes[MAX_BUTTON_PRESS_TIMES];
 int bptIndex;
-bool keyStroke = false;
+bool keyStroke = false; // vestigial: only the (disabled) inactivity timeout read this
 
 // dot/dash timing thresholds (dotTimeMillisMin/Max) live in morse.cpp
 
-// Reset Nano Function
+// Calling this jumps to address 0, restarting the sketch (a soft reset).
 void (*resetFunc)(void) = 0;
 
 void showDotDashActivity() {
 
   lcd.setCursor((dotDashActivityX), dotDashActivityY);
-  // lcd.print("CW");
   for (int i = 0; i < DOTDASH_DISPLAY_CELLS; i++) {
     if (isDot(buttonPressTimes[i])) {
       lcd.print(".");
     } else if (isDash((buttonPressTimes[i]))) {
       lcd.print("-");
-    } else { // not a dot or dash... not defined yet, make it a space/unfilled
-             // yet
+    } else {
+      // empty slot (not keyed yet) - draw a blank
       lcd.print(" ");
     }
   }
@@ -133,12 +128,10 @@ void welcomeBanner(int waitDelay) {
 }
 
 void resetSystem() {
-  welcomeBanner(
-      BANNER_DISPLAY_TIME); // show banner for BANNER_DISPLAY_TIME/1000 seconds
-                            // - 3 seconds
+  welcomeBanner(BANNER_DISPLAY_TIME);
 
   lcd.setCursor(0, 0);
-  lcd.print("Morse Code:"); // 20 x 4
+  lcd.print("Morse Code:");
   lcd.setCursor(0, 1);
 
   strcpy(row1, blankrow);
@@ -152,7 +145,7 @@ void resetSystem() {
   codeButtonPressed = false;
   codeButtonArmed = false;
   resetButtonPressTimes();
-  digitalWrite(CLEAR_BUTTON, HIGH); // 26Mar2025  - set clear button to HIGH
+  digitalWrite(CLEAR_BUTTON, HIGH); // enable internal pull-up on the clear button
   digitalWrite(LED_PIN, LOW);
   lastActivityTime = millis();
   codeTime = 0;
@@ -167,10 +160,9 @@ void setup() {
   pinMode(BUZZER_PIN, OUTPUT);
   pinMode(LED_PIN, OUTPUT);
 
-  lcd.init(); // initialize the lcd
+  lcd.init();
   lcd.backlight();
 
-  // testLines();
   resetSystem();
 }
 
@@ -181,71 +173,56 @@ void writeRow(const char *s) {
     lcd.write((uint8_t)*s++);
 }
 
+// Print one character to the bottom row. When the row fills, scroll the text
+// rows up (row3 -> row2 -> row1) and blank the bottom row.
 void displayChar(char DisplayChar) {
-  // we will display on the last row, and scroll up row 3-> 2, 2->1
-  // when we scroll up, we will blank the bottom row.
 
-  if (initialChar) {     // needed to stop initial char showing up
-    initialChar = false; // reset flag
-    return;              // return - we're not showing this character
+  if (initialChar) { // swallow the spurious first char after a reset
+    initialChar = false;
+    return;
   }
 
-  lcd.setCursor(DisplayPos, 3);     // put the cursor in the right spot on Row 4
-  lcd.write((uint8_t)DisplayChar);  // display the single character (raw, so the
-                                    // 0xFF error block renders correctly)
+  lcd.setCursor(DisplayPos, 3);
+  lcd.write((uint8_t)DisplayChar); // raw write so the 0xFF "unknown" block renders
 
-  row3[DisplayPos] = DisplayChar; // record the character in it's position
-  DisplayPos++;                   // move the position across one.
+  row3[DisplayPos] = DisplayChar;
+  DisplayPos++;
 
-  if (DisplayPos >= MaxColumns) { // if we've reached the end of the line, we
-                                  // need to scroll...
-
+  if (DisplayPos >= MaxColumns) { // bottom row full: scroll everything up
     Serial.println("MaxColumns reached, scrolling display.");
 
-    // we have reached the end of the line.
-    // we need to move the data up, and blank the bottom line.
-
-    // reset DisplayPos
     DisplayPos = 0;
 
-    // copy rows, reset row3, redisplay
     strcpy(row1, row2);
     strcpy(row2, row3);
     strcpy(row3, blankrow);
 
     lcd.setCursor(0, 1);
-    writeRow(row1); // display row1 (has contents of row2)
+    writeRow(row1);
 
     lcd.setCursor(0, 2);
-    writeRow(row2); // display row2 (has contents of row3)
+    writeRow(row2);
 
     lcd.setCursor(0, 3);
-    writeRow(row3); // display a blank line
+    writeRow(row3); // now blank
 
-    lcd.setCursor(0, 3); // put the cursor back at the beginning of row 4
+    lcd.setCursor(0, 3); // cursor back to start of bottom row
   }
 }
 
 void resetButtonPressTimes() {
-  // set all times to 0
   for (int i = 0; i < MAX_BUTTON_PRESS_TIMES; i++) {
-    buttonPressTimes[i] = 0; // set back to ZERO - ie no time recorded
+    buttonPressTimes[i] = 0;
   }
-  // showDotDashActivity ();  //clear the CW screen area
 }
 
 void resetTimeOut() {
-  // Clear the display and draw the header after NN seconds of inactivity
-  // we;re pretending to start again, with a new splashscreen and clear all old
-  // variables.
   Serial.println("RESET - Screen Cleared");
 
   resetSystem();
 
-  // resetSystem();
-  lastActivityTime =
-      millis();      // don't reset again, until inactvityTimeout comes up again
-  keyStroke = false; // reset this
+  lastActivityTime = millis();
+  keyStroke = false;
 }
 
 /* ***********************************************
@@ -253,91 +230,64 @@ MAIN LOOP HERE
 ************************************************ */
 void loop() {
 
-  unsigned long elapsedTime = millis() - lastActivityTime;
-  // if ((elapsedTime > inactivityTimeout) && keyStroke) {
-  // if (elapsedTime > inactivityTimeout) {   *DISABLED in V1.6*
-  //     // nothing has happened for a long time, reset everything.
-  //     resetSystem();
-  // }   *DISABLED in V1.6*
-
   scanButtons();
 
+  // A gap > 1600ms ends a word: insert a space. A shorter gap (> 600ms) just
+  // ends the current letter: decode the symbols collected so far.
   if (millis() - lastButtonPressTime > 1600 && newWord == true) {
     Serial.println("New word");
-
-    // lcd.print(' ');
-    displayChar(' '); // VK6XM Change
+    displayChar(' ');
     newWord = false;
   } else if (millis() - lastButtonPressTime > 600 && letterDecoded == false) {
     decodeButtonPresses();
     letterDecoded = true;
     codeButtonArmed = false;
-    // delay (5); //  allow button to fully be depressed, perior
   }
 }
 /* ***********************************************
 END: MAIN LOOP
 ************************************************ */
 
-void codeButtonDown() {
-  tone(BUZZER_PIN, 440, 60);
-  digitalWrite(LED_PIN, HIGH);
-  codeTime = millis() - startTime;
-  // lastActivityTime = millis();   //timeout function
-  // keyStroke = false;  //button was pressed, activity started.
-}
-
 void codeButtonReleased() {
   digitalWrite(LED_PIN, LOW);
 
-  // Most button bounces take less than 25 millis. If the code time
-  // is greater than 25 millis then it was probably a legit button press
+  // Ignore presses shorter than 25ms - those are almost always switch bounce
+  // rather than a real dot/dash.
   if (codeTime > 25) {
-    lastActivityTime = millis(); // timeout function
-    keyStroke = false;           // button was pressed, activity started.
+    lastActivityTime = millis();
+    keyStroke = false;
 
-    // Serial.print("Code time: ");
-    // Serial.print(codeTime);
-    // Serial.println(" milliseconds");
-
-    // Save codeTime
     buttonPressTimes[bptIndex] = codeTime;
     bptIndex++;
 
-    showDotDashActivity(); // iterate through button presses, evaluate and
-                           // display as buttons are being used.
+    showDotDashActivity(); // update the live dot/dash indicator
 
-    // if the dotDash buffer is full, then everything needs to be reset to ZERO
-    // time.
-    //  AND the dotDash Display needs to be reset as well.
+    // Buffer full: wrap back to the start so the next press doesn't write OOB.
     if (bptIndex >= MAX_BUTTON_PRESS_TIMES) {
       resetButtonPressTimes();
-      bptIndex = 0; // also reset the index, else the next press writes OOB
-      // clearDotDashActivity();  //clear up the Top Right display
+      bptIndex = 0;
     }
   }
 }
 
 void scanButtons() {
 
-  // Check for RESET Button press:
-  // 26Mar2025 Change - read CLEAR Button
+  // Clear button: soft-restart (clears screen and state) without power cycling.
   if (digitalRead(CLEAR_BUTTON) == LOW) {
-    resetSystem(); // restart the program, clear screen, start again without a
-                   // full power off/on
+    resetSystem();
   }
 
   if (!codeButtonArmed && digitalRead(CODE_BUTTON) == HIGH) {
+    // First edge of a new key-down: start the timer.
     codeButtonArmed = true;
-    // start timer
     startTime = millis();
     lastButtonPressTime = startTime;
     codeTime = 0;
     letterDecoded = false;
     newWord = true;
   } else if (digitalRead(CODE_BUTTON) == HIGH) {
+    // Still held down: keep the tone/LED on and accumulate the press duration.
     codeButtonPressed = true;
-    // codeButtonDown();
     tone(BUZZER_PIN, 440, 60);
     digitalWrite(LED_PIN, HIGH);
     codeTime = millis() - startTime;
@@ -349,13 +299,13 @@ void scanButtons() {
     codeButtonReleased();
     codeButtonArmed = false;
   }
-  delay(10);
+  delay(10); // crude debounce / poll interval; also the timing resolution of a dot
 }
 
 void decodeButtonPresses() {
 
-  /* DEBUG TO SERIAL */
-  Serial.print("DECODE LETTER: "); // DEBUG
+  // Dump the collected dots/dashes to serial for debugging.
+  Serial.print("DECODE LETTER: ");
   for (int i = 0; i < bptIndex; i++) {
     if (isDot(buttonPressTimes[i]))
       Serial.print(" DOT ");
@@ -363,17 +313,15 @@ void decodeButtonPresses() {
       Serial.print(" DASH");
   }
   Serial.print("   ");
-  /* DEBUG TO SERIAL */
 
   char c = decodeMorse(buttonPressTimes, bptIndex);
-  displayChar(
-      c); // vk6XM change -put the character on screen, and scroll if required.
-  Serial.print(c);  // DEBUG
-  Serial.println(); // DEBUG
+  displayChar(c);
+  Serial.print(c);
+  Serial.println();
 
-  bptIndex = 0;            // reset button press index to start
-  resetButtonPressTimes(); // clear all the times recorded
-  // clearDotDashActivity();  //clear up the Top Right display
+  // Done with this letter: clear the buffer ready for the next one.
+  bptIndex = 0;
+  resetButtonPressTimes();
 
   keyStroke = true;
 }
