@@ -227,7 +227,11 @@ void showRxActivity()
   lcd.setCursor(dotDashActivityX, HEADER_ROW);
   for (int i = 0; i < DOTDASH_DISPLAY_CELLS; i++)
   {
-    lcd.write((uint8_t)(i < patternLen ? currentPattern[i] : ' '));
+    char sym = i < patternLen ? currentPattern[i] : ' ';
+    // The pattern stores '.'/'-' for decoding, but the ASCII full stop sits on
+    // the baseline. Swap in the ROM's centered dot (0xA5) so dots and dashes
+    // line up vertically. The dash is already centered, so it passes through.
+    lcd.write((uint8_t)(sym == '.' ? 0xA5 : sym));
   }
 }
 
@@ -292,7 +296,8 @@ void renderHistory()
     {
       for (const char *p = history[i]; *p && pos < cells; p++)
       {
-        buf[pos++] = *p;
+        // Centered dot glyph (0xA5) for displayed dots; see showRxActivity().
+        buf[pos++] = (*p == '.') ? (char)0xA5 : *p;
       }
       if (pos < cells)
       {
