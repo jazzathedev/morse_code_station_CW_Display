@@ -17,10 +17,17 @@
 #include <SPI.h>
 #include <Wire.h>
 
-#include <LCDI2C_Generic.h>
-LCDI2C_Generic lcd(0x27, 20, 4); // I2C address: 0x27; Display size: 20x4
-
 #include "morse.h" // dot/dash classification + decodeMorse() lookup
+
+// LCD geometry and I2C address. Must match the physical display; the row
+// buffers and cursor positions below all derive from these.
+#define LCD_I2C_ADDR 0x27
+#define LCD_COLS 20
+#define LCD_ROWS 4
+#define BOTTOM_ROW (LCD_ROWS - 1) // decoded text is printed on the last row
+
+#include <LCDI2C_Generic.h>
+LCDI2C_Generic lcd(LCD_I2C_ADDR, LCD_COLS, LCD_ROWS);
 
 // Wiring for a parallel (non-I2C) LCD instead of the I2C one above:
 // #include <LiquidCrystal.h>
@@ -39,6 +46,19 @@ LCDI2C_Generic lcd(0x27, 20, 4); // I2C address: 0x27; Display size: 20x4
 #define CODE_BUTTON 3
 #define CLEAR_BUTTON 5
 
+// Inter-symbol gap timing. Once the key has been idle this long we end the
+// current letter (LETTER_GAP_MS); idle longer still ends the word and emits a
+// space (WORD_GAP_MS).
+#define LETTER_GAP_MS 600
+#define WORD_GAP_MS 1600
+
+// Presses shorter than this are treated as switch bounce, not a real dot/dash.
+#define BOUNCE_MS 25
+
+// Sidetone pitch (Hz) and duration (ms) sounded for each keyed symbol.
+#define TONE_HZ 440
+#define TONE_MS 60
+
 // Max symbols (dots/dashes) captured per character. Must cover the longest code
 // we decode: 7 for '$' (...-..-). Most letters/digits are <= 5, punctuation 6-7.
 #define MAX_BUTTON_PRESS_TIMES 8
@@ -49,20 +69,17 @@ LCDI2C_Generic lcd(0x27, 20, 4); // I2C address: 0x27; Display size: 20x4
 
 #define BANNER_DISPLAY_TIME 3000 // 3 seconds
 
-// Updated on each key press. The inactivity auto-reboot that used this is
-// currently disabled (timeout check in loop() is commented out).
-unsigned long lastActivityTime;
-
-// Row-scrolling buffers. Each holds one 20-char display row so the text can be
-// shifted up a line at a time as new characters fill the bottom row.
-#define BLANKROW "                    ";
+// Row-scrolling buffers. Each holds one display row of text so it can be shifted
+// up a line at a time as new characters fill the bottom row. BLANKROW must be
+// LCD_COLS spaces wide.
+#define BLANKROW "                    "
 char blankrow[] = BLANKROW;
 char row1[] = BLANKROW;
 char row2[] = BLANKROW;
 char row3[] = BLANKROW;
+static_assert(sizeof(BLANKROW) - 1 == LCD_COLS, "BLANKROW must be LCD_COLS spaces");
 
-int DisplayPos = 0; // current column on the bottom row
-int MaxColumns = 20;
+int displayPos = 0; // current column on the bottom row
 
 // Top-right screen position for the live dot/dash activity indicator.
 const unsigned int dotDashActivityX = 14;
@@ -86,12 +103,8 @@ bool initialChar = false; // suppresses the very first decoded char after reset
 // the next free slot; decodeMorse() reads buttonPressTimes[0..bptIndex).
 unsigned long buttonPressTimes[MAX_BUTTON_PRESS_TIMES];
 int bptIndex;
-bool keyStroke = false; // vestigial: only the (disabled) inactivity timeout read this
 
 // dot/dash timing thresholds (dotTimeMillisMin/Max) live in morse.cpp
-
-// Calling this jumps to address 0, restarting the sketch (a soft reset).
-void (*resetFunc)(void) = 0;
 
 void showDotDashActivity() {
 
@@ -139,24 +152,21 @@ void resetSystem() {
   strcpy(row3, blankrow);
   newWord = false;
   letterDecoded = true;
-  DisplayPos = 0; // reset column where printing will start
-  keyStroke = false;
+  displayPos = 0; // reset column where printing will start
   initialChar = false;
   codeButtonPressed = false;
   codeButtonArmed = false;
   resetButtonPressTimes();
-  digitalWrite(CLEAR_BUTTON, HIGH); // enable internal pull-up on the clear button
   digitalWrite(LED_PIN, LOW);
-  lastActivityTime = millis();
   codeTime = 0;
 }
 
 void setup() {
 
-  // Serial.begin(9600); // uncomment to enable serial debug output
+  Serial.begin(9600); // serial debug output
 
   pinMode(CODE_BUTTON, INPUT);
-  pinMode(CLEAR_BUTTON, INPUT);
+  pinMode(CLEAR_BUTTON, INPUT_PULLUP); // active-low button, no external resistor
   pinMode(BUZZER_PIN, OUTPUT);
   pinMode(LED_PIN, OUTPUT);
 
@@ -175,23 +185,23 @@ void writeRow(const char *s) {
 
 // Print one character to the bottom row. When the row fills, scroll the text
 // rows up (row3 -> row2 -> row1) and blank the bottom row.
-void displayChar(char DisplayChar) {
+void displayChar(char ch) {
 
   if (initialChar) { // swallow the spurious first char after a reset
     initialChar = false;
     return;
   }
 
-  lcd.setCursor(DisplayPos, 3);
-  lcd.write((uint8_t)DisplayChar); // raw write so the 0xFF "unknown" block renders
+  lcd.setCursor(displayPos, BOTTOM_ROW);
+  lcd.write((uint8_t)ch); // raw write so the 0xFF "unknown" block renders
 
-  row3[DisplayPos] = DisplayChar;
-  DisplayPos++;
+  row3[displayPos] = ch;
+  displayPos++;
 
-  if (DisplayPos >= MaxColumns) { // bottom row full: scroll everything up
-    Serial.println("MaxColumns reached, scrolling display.");
+  if (displayPos >= LCD_COLS) { // bottom row full: scroll everything up
+    Serial.println("Row full, scrolling display.");
 
-    DisplayPos = 0;
+    displayPos = 0;
 
     strcpy(row1, row2);
     strcpy(row2, row3);
@@ -203,10 +213,10 @@ void displayChar(char DisplayChar) {
     lcd.setCursor(0, 2);
     writeRow(row2);
 
-    lcd.setCursor(0, 3);
+    lcd.setCursor(0, BOTTOM_ROW);
     writeRow(row3); // now blank
 
-    lcd.setCursor(0, 3); // cursor back to start of bottom row
+    lcd.setCursor(0, BOTTOM_ROW); // cursor back to start of bottom row
   }
 }
 
@@ -216,15 +226,6 @@ void resetButtonPressTimes() {
   }
 }
 
-void resetTimeOut() {
-  Serial.println("RESET - Screen Cleared");
-
-  resetSystem();
-
-  lastActivityTime = millis();
-  keyStroke = false;
-}
-
 /* ***********************************************
 MAIN LOOP HERE
 ************************************************ */
@@ -232,13 +233,13 @@ void loop() {
 
   scanButtons();
 
-  // A gap > 1600ms ends a word: insert a space. A shorter gap (> 600ms) just
-  // ends the current letter: decode the symbols collected so far.
-  if (millis() - lastButtonPressTime > 1600 && newWord == true) {
+  // A gap past WORD_GAP_MS ends a word: insert a space. A shorter gap (past
+  // LETTER_GAP_MS) just ends the current letter: decode what we have so far.
+  if (millis() - lastButtonPressTime > WORD_GAP_MS && newWord) {
     Serial.println("New word");
     displayChar(' ');
     newWord = false;
-  } else if (millis() - lastButtonPressTime > 600 && letterDecoded == false) {
+  } else if (millis() - lastButtonPressTime > LETTER_GAP_MS && !letterDecoded) {
     decodeButtonPresses();
     letterDecoded = true;
     codeButtonArmed = false;
@@ -251,12 +252,9 @@ END: MAIN LOOP
 void codeButtonReleased() {
   digitalWrite(LED_PIN, LOW);
 
-  // Ignore presses shorter than 25ms - those are almost always switch bounce
-  // rather than a real dot/dash.
-  if (codeTime > 25) {
-    lastActivityTime = millis();
-    keyStroke = false;
-
+  // Ignore presses shorter than BOUNCE_MS - those are almost always switch
+  // bounce rather than a real dot/dash.
+  if (codeTime > BOUNCE_MS) {
     buttonPressTimes[bptIndex] = codeTime;
     bptIndex++;
 
@@ -288,14 +286,12 @@ void scanButtons() {
   } else if (digitalRead(CODE_BUTTON) == HIGH) {
     // Still held down: keep the tone/LED on and accumulate the press duration.
     codeButtonPressed = true;
-    tone(BUZZER_PIN, 440, 60);
+    tone(BUZZER_PIN, TONE_HZ, TONE_MS);
     digitalWrite(LED_PIN, HIGH);
     codeTime = millis() - startTime;
-    keyStroke = true;
   }
   if (codeButtonPressed && digitalRead(CODE_BUTTON) == LOW) {
     codeButtonPressed = false;
-    keyStroke = true;
     codeButtonReleased();
     codeButtonArmed = false;
   }
@@ -322,6 +318,4 @@ void decodeButtonPresses() {
   // Done with this letter: clear the buffer ready for the next one.
   bptIndex = 0;
   resetButtonPressTimes();
-
-  keyStroke = true;
 }
