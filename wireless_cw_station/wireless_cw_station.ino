@@ -85,6 +85,11 @@ const byte ADDRESS[][6] = {"pipe1", "pipe2"}; // two-way comms addresses
 // avoid two units keying over each other (half-duplex lockout).
 #define RX_TX_LOCKOUT_MS 3000
 
+// Fail-safe for a dropped key-up packet. If the remote key looks held longer
+// than any real dot/dash could last, force it back up so the buzzer/LED don't
+// stay stuck on. Must be longer than the longest deliberate element.
+#define STUCK_KEY_MS 1500
+
 // How long panic() flashes the LEDs (and shows RADIO FAULT) before it gives up
 // and returns so the caller can retry. Recoverable - a transient radio glitch
 // or a module that wasn't ready at boot won't brick the unit permanently.
@@ -386,10 +391,11 @@ MAIN LOOP HERE
 ************************************************ */
 void loop()
 {
-  scanControls();       // mode switch + clear button
-  transmitLocalKey();   // send the local key over the radio
-  receiveRemoteKey();   // receive the remote key and feed the decoder
-  updateDecodeTiming(); // gaps end the current letter/word
+  scanControls();          // mode switch + clear button
+  transmitLocalKey();      // send the local key over the radio
+  receiveRemoteKey();      // receive the remote key and feed the decoder
+  releaseStuckRemoteKey(); // recover if a key-up packet was lost
+  updateDecodeTiming();    // gaps end the current letter/word
 }
 /* ***********************************************
 END: MAIN LOOP
@@ -512,6 +518,21 @@ void onRemoteKeyUp()
     letterPending = true;
     wordPending = true;
     showRxActivity();
+  }
+}
+
+// If a key-up packet was lost the remote key stays "down" forever, jamming the
+// buzzer/LED on. Once it has been held longer than any real element, drop it.
+// The runaway duration isn't a valid dot/dash, so we discard it rather than
+// record a bogus symbol.
+void releaseStuckRemoteKey()
+{
+  if (rxKeyDown && (millis() - rxKeyDownStart > STUCK_KEY_MS))
+  {
+    rxKeyDown = false;
+    lastRxActivity = millis();
+    digitalWrite(STATUS_LED_PIN, LOW);
+    noTone(BUZZER_PIN);
   }
 }
 
