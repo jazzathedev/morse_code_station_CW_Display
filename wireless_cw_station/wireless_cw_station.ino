@@ -40,7 +40,7 @@
 LCDI2C_Generic lcd(LCD_I2C_ADDR, LCD_COLS, LCD_ROWS);
 
 #define VER 2
-#define SUBVER 0
+#define SUBVER 1
 
 // Stringize VER/SUBVER so the banner can show "v2.0" without hardcoding it.
 #define STR_HELPER(x) #x
@@ -62,19 +62,28 @@ LCDI2C_Generic lcd(LCD_I2C_ADDR, LCD_COLS, LCD_ROWS);
 RF24 radio(RADIO_CE_PIN, RADIO_CSN_PIN);
 
 // The unit number (which board this is) is chosen at boot by tapping the key and
-// stored in EEPROM - see selectUnitNumber(). It selects the radio pipes and
-// sidetone pitches so the two units pair up. The two units must be different
-// numbers (1 and 2) to talk.
+// stored in EEPROM - see selectUnitNumber(). It selects the radio pipes, channel
+// and sidetone pitches so the units pair up. Units pair two at a time: 1<->2,
+// 3<->4 and 5<->6 each talk on their own channel/pipe pair, so three independent
+// links can run at once. The two units in a pair must be the two different
+// numbers to talk. To add more pairs, extend ADDRESS and PAIR_CHANNELS together.
 #define DEFAULT_UNIT 1     // used when EEPROM holds nothing valid
-#define MAX_UNITS 2        // tap-cycle wraps 1 -> 2 -> ... -> 1
 #define UNIT_EEPROM_ADDR 0 // byte offset where the unit number is stored
 // The chooser shares the start-up banner's window (BANNER_DISPLAY_TIME) - tap
 // during the banner to cycle the unit, no extra boot delay.
 
 uint8_t unitNumber = DEFAULT_UNIT; // this board's number, set in selectUnitNumber()
 
-const byte ADDRESS[][6] = {"pipe1", "pipe2"}; // two-way comms addresses
-#define RADIO_CHANNEL 76                      // 0-83 legal in AU, maps to 2400+N MHz
+// Two-way comms addresses, one pair per link: units 1/2 use [0]/[1], 3/4 use
+// [2]/[3], 5/6 use [4]/[5]. Within a pair the odd unit writes the first address
+// and reads the second; the even unit is the mirror image.
+const byte ADDRESS[][6] = {"pipe1", "pipe2", "pipe3", "pipe4", "pipe5", "pipe6"};
+// Each pair sits on its own channel so the links don't talk over each other.
+// 0-83 legal in AU, maps to 2400+N MHz; spaced well apart to avoid adjacency.
+const uint8_t PAIR_CHANNELS[] = {76, 40, 8}; // units 1/2, 3/4, 5/6
+
+#define NUM_PAIRS (sizeof(PAIR_CHANNELS) / sizeof(PAIR_CHANNELS[0]))
+#define MAX_UNITS (NUM_PAIRS * 2) // tap-cycle wraps 1 -> ... -> MAX_UNITS -> 1
 
 // Sidetone pitch (Hz), derived from unitNumber after selection. You hear your
 // own key at your unit's pitch and the remote key at theirs, so the two are easy
@@ -211,21 +220,27 @@ void setupRadio()
   }
   Serial.println("Radio init ok");
 
-  // Board 1 writes to pipe1 and reads pipe2; board 2 is the mirror image.
-  if (unitNumber == 1)
+  // Pick this unit's pair of pipes: units 1/2 -> ADDRESS[0]/[1], 3/4 -> [2]/[3],
+  // 5/6 -> [4]/[5]. Within a pair the odd unit (1, 3, 5) writes the first address
+  // and reads the second; the even unit (2, 4, 6) is the mirror image.
+  uint8_t pairIndex = (unitNumber - 1) / 2; // 0 for 1/2, 1 for 3/4, 2 for 5/6
+  uint8_t pairBase = pairIndex * 2;
+  bool oddInPair = (unitNumber % 2 == 1); // units 1, 3, 5
+  if (oddInPair)
   {
-    radio.openWritingPipe(ADDRESS[0]);
-    radio.openReadingPipe(1, ADDRESS[1]);
+    radio.openWritingPipe(ADDRESS[pairBase]);
+    radio.openReadingPipe(1, ADDRESS[pairBase + 1]);
   }
   else
   {
-    radio.openWritingPipe(ADDRESS[1]);
-    radio.openReadingPipe(1, ADDRESS[0]);
+    radio.openWritingPipe(ADDRESS[pairBase + 1]);
+    radio.openReadingPipe(1, ADDRESS[pairBase]);
   }
 
   radio.setPALevel(RF24_PA_LOW);
   radio.setDataRate(RF24_250KBPS);
-  radio.setChannel(RADIO_CHANNEL);
+  // Each pair on its own channel so the links stay separate.
+  radio.setChannel(PAIR_CHANNELS[pairIndex]);
   radio.setAutoAck(true);
   radio.setRetries(5, 15); // 1500us between retries, up to 15 attempts
   radio.startListening();
@@ -234,7 +249,7 @@ void setupRadio()
 // --- Display ----------------------------------------------------------------
 
 // Column where the label ends, so the link glyph can sit right after it. The
-// unit number is a single digit (MAX_UNITS == 2), so this is a known column.
+// unit number is a single digit (MAX_UNITS <= 9), so this is a known column.
 int labelEndCol()
 {
   return modeDecoded ? 10 : 5; // "U1 CW TEXT" vs "U1 CW"
@@ -522,8 +537,11 @@ void setup()
   // Choose this unit's number (tap the key during the banner), then derive the
   // sidetone pitches from it before the radio pipes are set up.
   selectUnitNumber();
-  toneLocalHz = (unitNumber == 1) ? 600 : 900;
-  toneRemoteHz = (unitNumber == 1) ? 900 : 600;
+  // Within a pair the odd unit (1, 3) keys at the low pitch and hears the high
+  // one; the even unit (2, 4) is reversed, so the two sides are easy to tell apart.
+  bool oddInPair = (unitNumber % 2 == 1);
+  toneLocalHz = oddInPair ? 600 : 900;
+  toneRemoteHz = oddInPair ? 900 : 600;
 
   setupRadio();
 
