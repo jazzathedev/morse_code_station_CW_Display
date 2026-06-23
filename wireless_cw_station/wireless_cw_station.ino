@@ -115,12 +115,30 @@ int toneRemoteHz;
 // when the switch is enabled, and the only mode when it is disabled. So to force
 // letter display, set MODE_SWITCH_ENABLED 0 and START_MODE_DECODED 1.
 #define MODE_SWITCH_ENABLED 0
-#define START_MODE_DECODED 0
+#define START_MODE_DECODED 1
 
 // Live dot/dash indicator: top-right of the header row, showing the symbols of
 // the remote letter currently being keyed.
 #define DOTDASH_DISPLAY_CELLS 6
 const unsigned int dotDashActivityX = 14;
+
+// Header link indicator. We no longer panic when the peer is unreachable, so
+// the header instead shows a link glyph while the peer has been heard within
+// LINK_TIMEOUT_MS - a packet was received, or one of ours was acked. It sits
+// right after the "U1 CW"/"U1 CW TEXT" label and goes blank once the link
+// falls quiet. So the link shows even when nobody is keying, the unit sends a
+// silent keepalive ping every LINK_PING_MS while idle; its ack confirms the
+// link.
+#define LINK_TIMEOUT_MS 5000
+#define LINK_PING_MS 1000
+// Two arrows pointing at each other (right-arrow then left-arrow) in the LCD's
+// ROM, drawn side by side as the "linked" glyph.
+#define LINK_GLYPH_RIGHT 0x7E // 01111110
+#define LINK_GLYPH_LEFT 0x7F  // 01111111
+
+// Radio payload is a single byte: 0/1 carry the (active-low) key state, and
+// PKT_PING marks an idle keepalive that updates the link but is not a key event.
+#define PKT_PING 2
 
 // MAX_PATTERN (the longest morse pattern, 7 symbols) comes from morse.h.
 
@@ -147,6 +165,11 @@ bool modeDecoded = false; // false = raw dots/dashes, true = decoded text
 bool rxKeyDown = false;
 unsigned long rxKeyDownStart = 0; // millis() of the current remote key-down
 unsigned long lastRxActivity = 0; // millis() of the last remote key edge, for gaps
+
+// Link tracking for the header indicator.
+unsigned long lastLinkActivity = 0; // millis() of the last received or acked packet
+unsigned long lastPing = 0;         // millis() of the last idle keepalive ping
+bool linkShown = false;             // current state of the header link glyph
 
 // Local key (TX) state, mirrored from the cw-send-receive radio sketch.
 bool buttonState = false; // last received remote state (LOW = key down)
@@ -210,6 +233,13 @@ void setupRadio()
 
 // --- Display ----------------------------------------------------------------
 
+// Column where the label ends, so the link glyph can sit right after it. The
+// unit number is a single digit (MAX_UNITS == 2), so this is a known column.
+int labelEndCol()
+{
+  return modeDecoded ? 10 : 5; // "U1 CW TEXT" vs "U1 CW"
+}
+
 // Header row: unit number + current mode on the left, live dot/dash indicator
 // for the in-progress remote letter on the right.
 void showHeader()
@@ -218,7 +248,32 @@ void showHeader()
   lcd.print("U");
   lcd.print(unitNumber);
   lcd.print(modeDecoded ? " CW TEXT" : " CW");
-  lcd.print("       "); // pad up to the live indicator at column 14
+
+  // Blank the gap between the label and the live dot/dash area, then force the
+  // link glyph to redraw - the header may have just been cleared.
+  for (int x = labelEndCol(); x < (int)dotDashActivityX; x++)
+  {
+    lcd.write(' ');
+  }
+  linkShown = false;
+  showLinkIndicator();
+}
+
+// Header link indicator: shows the two-arrow glyph right after the label while
+// the peer has been heard within LINK_TIMEOUT_MS, blank once the link falls
+// quiet. Touches the LCD only on a state change so it's cheap to poll every loop.
+void showLinkIndicator()
+{
+  bool linked = lastLinkActivity != 0 &&
+                (millis() - lastLinkActivity) < LINK_TIMEOUT_MS;
+  if (linked == linkShown)
+  {
+    return;
+  }
+  linkShown = linked;
+  lcd.setCursor(labelEndCol() + 1, HEADER_ROW); // one space after the label
+  lcd.write(linked ? (uint8_t)LINK_GLYPH_RIGHT : ' ');
+  lcd.write(linked ? (uint8_t)LINK_GLYPH_LEFT : ' ');
 }
 
 // Show the symbols of the remote letter currently being keyed, top-right.
@@ -487,9 +542,11 @@ void loop()
 {
   scanControls();          // mode switch + clear button
   transmitLocalKey();      // send the local key over the radio
+  pingLink();              // idle keepalive so the link shows without keying
   receiveRemoteKey();      // receive the remote key and feed the decoder
   releaseStuckRemoteKey(); // recover if a key-up packet was lost
   updateDecodeTiming();    // gaps end the current letter/word
+  showLinkIndicator();     // header link glyph tracks peer reachability
 }
 /* ***********************************************
 END: MAIN LOOP
@@ -547,6 +604,12 @@ void transmitLocalKey()
     // and carry on; the local sidetone/LED below still track the key.
     Serial.println(txOk ? "TX ok" : "TX FAILED");
 
+    // An ack means the peer is alive and in range - keep the link glyph lit.
+    if (txOk)
+    {
+      lastLinkActivity = millis();
+    }
+
     if (debouncedButtonState == LOW)
     { // active-low key: LOW = pressed
       digitalWrite(CONFIRM_LED_PIN, HIGH);
@@ -562,6 +625,37 @@ void transmitLocalKey()
   delay(5);
 }
 
+// Idle keepalive: when nothing is being keyed, ping the peer every LINK_PING_MS
+// so the header link glyph reflects the actual radio link, not just whether we
+// happen to be transmitting. The ping carries PKT_PING so the peer counts it as
+// link activity without treating it as a key event. Its ack lights our own link.
+void pingLink()
+{
+  unsigned long now = millis();
+  if (now - lastPing < LINK_PING_MS)
+  {
+    return;
+  }
+
+  // Stay off the air while either key is down or during the post-RX lockout, so
+  // keepalives never talk over real keying.
+  if (debouncedButtonState == LOW || rxKeyDown ||
+      now - timeOfLastReceive < RX_TX_LOCKOUT_MS)
+  {
+    return;
+  }
+
+  lastPing = now;
+  uint8_t ping = PKT_PING;
+  radio.stopListening();
+  bool ok = radio.write(&ping, sizeof(ping));
+  radio.startListening();
+  if (ok)
+  {
+    lastLinkActivity = now;
+  }
+}
+
 // Receive the remote key state and drive the LED, sidetone and decoder.
 void receiveRemoteKey()
 {
@@ -570,7 +664,20 @@ void receiveRemoteKey()
     return;
   }
 
-  radio.read(&buttonState, sizeof(buttonState));
+  uint8_t rxByte;
+  radio.read(&rxByte, sizeof(rxByte));
+
+  // Any packet - key edge or keepalive - means the link is up.
+  lastLinkActivity = millis();
+
+  // A keepalive ping carries no key event and must not start the turn-taking
+  // lockout, or a steadily-pinging idle peer would jam our own keying.
+  if (rxByte == PKT_PING)
+  {
+    return;
+  }
+
+  buttonState = rxByte;
   timeOfLastReceive = millis();
   Serial.print("Received: ");
   Serial.println(buttonState);
