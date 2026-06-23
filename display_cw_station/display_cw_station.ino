@@ -111,7 +111,9 @@ void showDotDashActivity() {
   lcd.setCursor((dotDashActivityX), dotDashActivityY);
   for (int i = 0; i < DOTDASH_DISPLAY_CELLS; i++) {
     if (isDot(buttonPressTimes[i])) {
-      lcd.print(".");
+      // The ASCII full stop sits on the baseline; swap in the ROM's centered
+      // dot (0xA5) so dots line up vertically with dashes.
+      lcd.write((uint8_t)0xA5);
     } else if (isDash((buttonPressTimes[i]))) {
       lcd.print("-");
     } else {
