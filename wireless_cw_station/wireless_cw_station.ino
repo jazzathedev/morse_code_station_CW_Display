@@ -4,9 +4,13 @@
  *
  * Two units form a link. The local straight key on KEY_PIN is transmitted to the
  * remote unit over the radio (TX), and the remote unit's keying is received (RX)
- * and shown on this LCD. By default the screen shows the raw keyed dots and
- * dashes of the remote sender; flipping the MODE switch re-renders the same
- * buffered keying as decoded text for kids to read.
+ * and shown on this LCD. The MODE jumper, read at boot, picks whether the screen
+ * shows the remote sender's raw keyed dots and dashes or the same buffered keying
+ * decoded as text for kids to read.
+ *
+ * Up to four independent links can run at once: two select jumpers hardwire the
+ * board's pair (channel + pipes), and a key tap at boot picks which side (A or B)
+ * of that pair this board is. So 1A pairs with 1B, 2A with 2B, and so on.
  *
  * Radio link logic is based on the cw-send-receive-arduino NRF24 sketch; the
  * decode/display work is shared with the wired display station (morse.*).
@@ -40,7 +44,7 @@
 LCDI2C_Generic lcd(LCD_I2C_ADDR, LCD_COLS, LCD_ROWS);
 
 #define VER 2
-#define SUBVER 1
+#define SUBVER 2
 
 // Stringize VER/SUBVER so the banner can show "v2.0" without hardcoding it.
 #define STR_HELPER(x) #x
@@ -53,41 +57,51 @@ LCDI2C_Generic lcd(LCD_I2C_ADDR, LCD_COLS, LCD_ROWS);
 #define KEY_PIN 3         // local straight key (to transmit)
 #define CONFIRM_LED_PIN 4 // yellow: lit while transmitting the local key
 #define STATUS_LED_PIN 5  // red: lit while receiving the remote key
-#define MODE_SWITCH_PIN 6 // toggles raw dots/dashes vs decoded text
+#define MODE_SWITCH_PIN 6 // LOW (jumper to GND) = decoded text, HIGH = raw; read at boot
 #define CLEAR_BUTTON 7    // soft-restart (clears screen and state)
 #define RADIO_CE_PIN 9
 #define RADIO_CSN_PIN 8
+// Pair select: two jumpers (to GND) pick which of the four links this board joins.
+// INPUT_PULLUP, so unwired = HIGH; pairIndex = (A << 1) | B. Read once at boot.
+#define PAIR_A_PIN A0 // pair select high bit
+#define PAIR_B_PIN A1 // pair select low bit
 // SPI for the radio is fixed on the Nano: D11 MOSI, D12 MISO, D13 SCK.
 
 RF24 radio(RADIO_CE_PIN, RADIO_CSN_PIN);
 
-// The unit number (which board this is) is chosen at boot by tapping the key and
-// stored in EEPROM - see selectUnitNumber(). It selects the radio pipes, channel
-// and sidetone pitches so the units pair up. Units pair two at a time: 1<->2,
-// 3<->4 and 5<->6 each talk on their own channel/pipe pair, so three independent
-// links can run at once. The two units in a pair must be the two different
-// numbers to talk. To add more pairs, extend ADDRESS and PAIR_CHANNELS together.
-#define DEFAULT_UNIT 1     // used when EEPROM holds nothing valid
-#define UNIT_EEPROM_ADDR 0 // byte offset where the unit number is stored
+// A board's identity has two parts. The PAIR (which link, 1-4) is hardwired by
+// the two select jumpers and read at boot - it picks the channel and pipe pair.
+// The SIDE (A or B, the two halves of that link) is chosen by tapping the key at
+// boot and stored in EEPROM. So 1A talks to 1B, 2A to 2B, and so on; the two
+// boards in a pair must be opposite sides. To add more pairs, extend ADDRESS and
+// PAIR_CHANNELS together (and add select pins if you need more than four).
+#define SIDE_EEPROM_ADDR 0 // byte offset where the side bool is stored (0=A, 1=B)
 // The chooser shares the start-up banner's window (BANNER_DISPLAY_TIME) - tap
-// during the banner to cycle the unit, no extra boot delay.
+// during the banner to flip the side, no extra boot delay.
 
-uint8_t unitNumber = DEFAULT_UNIT; // this board's number, set in selectUnitNumber()
+uint8_t pairIndex = 0;  // 0-3, set from the select pins in selectSide()
+bool sideB = false;     // false = side A, true = side B; persisted in EEPROM
 
-// Two-way comms addresses, one pair per link: units 1/2 use [0]/[1], 3/4 use
-// [2]/[3], 5/6 use [4]/[5]. Within a pair the odd unit writes the first address
-// and reads the second; the even unit is the mirror image.
-const byte ADDRESS[][6] = {"pipe1", "pipe2", "pipe3", "pipe4", "pipe5", "pipe6"};
+// Two-way comms addresses, one pair per link: pair 1 uses [0]/[1], 2 uses [2]/[3],
+// 3 uses [4]/[5], 4 uses [6]/[7]. Within a pair side A writes the first address
+// and reads the second; side B is the mirror image.
+const byte ADDRESS[][6] = {"pipe1", "pipe2", "pipe3", "pipe4",
+                           "pipe5", "pipe6", "pipe7", "pipe8"};
 // Each pair sits on its own channel so the links don't talk over each other.
 // 0-83 legal in AU, maps to 2400+N MHz; spaced well apart to avoid adjacency.
-const uint8_t PAIR_CHANNELS[] = {76, 40, 8}; // units 1/2, 3/4, 5/6
+const uint8_t PAIR_CHANNELS[] = {76, 40, 8, 24}; // pairs 1, 2, 3, 4
 
+// Number of pairs supported. The two select pins yield four combinations, so
+// PAIR_CHANNELS and ADDRESS must cover at least this many pairs.
 #define NUM_PAIRS (sizeof(PAIR_CHANNELS) / sizeof(PAIR_CHANNELS[0]))
-#define MAX_UNITS (NUM_PAIRS * 2) // tap-cycle wraps 1 -> ... -> MAX_UNITS -> 1
 
-// Sidetone pitch (Hz), derived from unitNumber after selection. You hear your
-// own key at your unit's pitch and the remote key at theirs, so the two are easy
-// to tell apart.
+// Display helpers for the pair/side identity, e.g. pair 1 side B -> "1B".
+uint8_t pairLabel() { return pairIndex + 1; } // 1-based pair number for display
+char sideChar() { return sideB ? 'B' : 'A'; }
+
+// Sidetone pitch (Hz), derived from the side after selection. You hear your own
+// key at your side's pitch and the remote key at theirs, so the two are easy to
+// tell apart. Side A keys low (600) and hears high (900); side B is reversed.
 int toneLocalHz;
 int toneRemoteHz;
 
@@ -116,15 +130,9 @@ int toneRemoteHz;
 
 #define BANNER_DISPLAY_TIME 3000 // 3 seconds
 
-// Display mode select.
-//   MODE_SWITCH_ENABLED 1 - the D6 switch toggles raw dots/dashes vs text live.
-//   MODE_SWITCH_ENABLED 0 - ignore the switch and stay fixed on START_MODE_DECODED
-//                           (handy when the MODE switch isn't wired up yet).
-// START_MODE_DECODED: 0 = raw dots/dashes, 1 = decoded text. It is the boot mode
-// when the switch is enabled, and the only mode when it is disabled. So to force
-// letter display, set MODE_SWITCH_ENABLED 0 and START_MODE_DECODED 1.
-#define MODE_SWITCH_ENABLED 0
-#define START_MODE_DECODED 1
+// Display mode is set by the MODE_SWITCH_PIN jumper, read once at boot: LOW
+// (jumpered to GND) shows decoded text, HIGH (unwired) shows raw dots/dashes.
+// Flipping it later has no effect until the next restart.
 
 // Live dot/dash indicator: top-right of the header row, showing the symbols of
 // the remote letter currently being keyed.
@@ -220,18 +228,16 @@ void setupRadio()
   }
   Serial.println("Radio init ok");
 
-  // Pick this unit's pair of pipes: units 1/2 -> ADDRESS[0]/[1], 3/4 -> [2]/[3],
-  // 5/6 -> [4]/[5]. Within a pair the odd unit (1, 3, 5) writes the first address
-  // and reads the second; the even unit (2, 4, 6) is the mirror image.
-  uint8_t pairIndex = (unitNumber - 1) / 2; // 0 for 1/2, 1 for 3/4, 2 for 5/6
+  // Pick this board's pipes from its pair: pair 1 -> ADDRESS[0]/[1], 2 -> [2]/[3],
+  // 3 -> [4]/[5], 4 -> [6]/[7]. Side A writes the first address and reads the
+  // second; side B is the mirror image.
   uint8_t pairBase = pairIndex * 2;
-  bool oddInPair = (unitNumber % 2 == 1); // units 1, 3, 5
-  if (oddInPair)
+  if (!sideB) // side A
   {
     radio.openWritingPipe(ADDRESS[pairBase]);
     radio.openReadingPipe(1, ADDRESS[pairBase + 1]);
   }
-  else
+  else // side B
   {
     radio.openWritingPipe(ADDRESS[pairBase + 1]);
     radio.openReadingPipe(1, ADDRESS[pairBase]);
@@ -249,19 +255,19 @@ void setupRadio()
 // --- Display ----------------------------------------------------------------
 
 // Column where the label ends, so the link glyph can sit right after it. The
-// unit number is a single digit (MAX_UNITS <= 9), so this is a known column.
+// pair/side label is a fixed two characters (e.g. "1A"), so this is a known column.
 int labelEndCol()
 {
-  return modeDecoded ? 10 : 5; // "U1 CW TEXT" vs "U1 CW"
+  return modeDecoded ? 10 : 5; // "1A CW TEXT" vs "1A CW"
 }
 
-// Header row: unit number + current mode on the left, live dot/dash indicator
+// Header row: pair/side label + current mode on the left, live dot/dash indicator
 // for the in-progress remote letter on the right.
 void showHeader()
 {
   lcd.setCursor(0, HEADER_ROW);
-  lcd.print("U");
-  lcd.print(unitNumber);
+  lcd.print(pairLabel());
+  lcd.write(sideChar());
   lcd.print(modeDecoded ? " CW TEXT" : " CW");
 
   // Blank the gap between the label and the live dot/dash area, then force the
@@ -412,15 +418,16 @@ void welcomeBanner(int waitDelay)
   lcd.print(" Wireless CW");
   lcd.setCursor(0, 2);
   lcd.print(VERSION_STR "  Unit ");
-  lcd.print(unitNumber);
+  lcd.print(pairLabel());
+  lcd.write(sideChar());
   lcd.setCursor(0, 3);
   lcd.print("By VK6TU/VK6XM");
   delay(waitDelay);
   lcd.clear();
 }
 
-// Boot banner that doubles as the unit chooser - shows the unit number and the
-// "tap key" hint. Redrawn each time the number changes.
+// Boot banner that doubles as the side chooser - shows the hardwired pair, the
+// current side and the "tap key" hint. Redrawn each time the side flips.
 void drawBootBanner()
 {
   lcd.clear();
@@ -430,29 +437,35 @@ void drawBootBanner()
   lcd.print(" Wireless CW " VERSION_STR);
   lcd.setCursor(0, 2);
   lcd.print(" Unit ");
-  lcd.print(unitNumber);
+  lcd.print(pairLabel());
+  lcd.write(sideChar());
   lcd.setCursor(0, 3);
-  lcd.print("Tap key to change");
+  lcd.print("Tap key: side A/B");
 }
 
-// Boot-time unit chooser. Loads the saved unit from EEPROM, then for the banner
-// window each key tap cycles the number (1 -> 2 -> ... -> 1). The result is saved
-// back to EEPROM so it sticks across power cycles, and confirmed with a beep per
-// unit so it's readable even with no display. Runs before the radio listens, so
-// taps don't transmit. Shares BANNER_DISPLAY_TIME - no extra boot delay.
-void selectUnitNumber()
+// Boot-time side chooser. Reads the hardwired pair from the select pins, loads
+// the saved side from EEPROM, then for the banner window each key tap flips the
+// side (A <-> B). The result is saved back to EEPROM so it sticks across power
+// cycles, and confirmed with a beep (one for A, two for B) so it's readable even
+// with no display. Runs before the radio listens, so taps don't transmit. Shares
+// BANNER_DISPLAY_TIME - no extra boot delay.
+void selectSide()
 {
-  unitNumber = EEPROM.read(UNIT_EEPROM_ADDR);
-  if (unitNumber < 1 || unitNumber > MAX_UNITS)
+  // Read the hardwired pair (jumpers to GND, INPUT_PULLUP so unwired = HIGH).
+  pairIndex = (digitalRead(PAIR_A_PIN) << 1) | digitalRead(PAIR_B_PIN);
+  if (pairIndex >= NUM_PAIRS)
   {
-    unitNumber = DEFAULT_UNIT; // fresh/invalid EEPROM (e.g. 0xFF)
+    pairIndex = 0; // guard if PAIR_CHANNELS has fewer than four entries
   }
-  uint8_t startUnit = unitNumber;
+
+  uint8_t stored = EEPROM.read(SIDE_EEPROM_ADDR);
+  sideB = (stored == 1); // anything else (old unit number, 0xFF) defaults to A
+  bool startSide = sideB;
 
   drawBootBanner();
 
-  // Wait for the banner window to elapse with no tap. Each tap cycles the number
-  // and restarts the window, so it confirms 3s after your last press.
+  // Wait for the banner window to elapse with no tap. Each tap flips the side and
+  // restarts the window, so it confirms 3s after your last press.
   bool prevKey = HIGH; // active-low key, idle HIGH
   unsigned long lastActivity = millis();
   while (millis() - lastActivity < BANNER_DISPLAY_TIME)
@@ -460,8 +473,8 @@ void selectUnitNumber()
     bool k = digitalRead(KEY_PIN);
     if (prevKey == HIGH && k == LOW) // falling edge = a tap
     {
-      unitNumber = (unitNumber % MAX_UNITS) + 1; // cycle 1..MAX_UNITS
-      tone(BUZZER_PIN, 880, 60);                 // short tap blip
+      sideB = !sideB;            // flip A <-> B
+      tone(BUZZER_PIN, 880, 60); // short tap blip
       drawBootBanner();
       lastActivity = millis(); // restart the window from this tap
       delay(50);               // debounce the tap
@@ -469,13 +482,14 @@ void selectUnitNumber()
     prevKey = k;
   }
 
-  if (unitNumber != startUnit)
+  if (sideB != startSide)
   {
-    EEPROM.update(UNIT_EEPROM_ADDR, unitNumber); // update() only writes on change
+    EEPROM.update(SIDE_EEPROM_ADDR, sideB ? 1 : 0); // update() only writes on change
   }
 
-  // Confirm the landing number: one beep/blink per unit.
-  for (uint8_t i = 0; i < unitNumber; i++)
+  // Confirm the landing side: one beep/blink for A, two for B.
+  uint8_t beeps = sideB ? 2 : 1;
+  for (uint8_t i = 0; i < beeps; i++)
   {
     digitalWrite(CONFIRM_LED_PIN, HIGH);
     tone(BUZZER_PIN, 660, 120);
@@ -486,7 +500,7 @@ void selectUnitNumber()
 }
 
 // Reset operating state and draw the live screen, without the banner. Used at
-// boot, where the unit chooser has already shown the banner for its window.
+// boot, where the side chooser has already shown the banner for its window.
 void initStation()
 {
   historyCount = 0;
@@ -521,6 +535,8 @@ void setup()
   pinMode(KEY_PIN, INPUT_PULLUP);
   pinMode(MODE_SWITCH_PIN, INPUT_PULLUP);
   pinMode(CLEAR_BUTTON, INPUT_PULLUP);
+  pinMode(PAIR_A_PIN, INPUT_PULLUP);
+  pinMode(PAIR_B_PIN, INPUT_PULLUP);
   pinMode(BUZZER_PIN, OUTPUT);
   pinMode(CONFIRM_LED_PIN, OUTPUT);
   pinMode(STATUS_LED_PIN, OUTPUT);
@@ -534,22 +550,18 @@ void setup()
   lcd.init();
   lcd.backlight();
 
-  // Choose this unit's number (tap the key during the banner), then derive the
-  // sidetone pitches from it before the radio pipes are set up.
-  selectUnitNumber();
-  // Within a pair the odd unit (1, 3) keys at the low pitch and hears the high
-  // one; the even unit (2, 4) is reversed, so the two sides are easy to tell apart.
-  bool oddInPair = (unitNumber % 2 == 1);
-  toneLocalHz = oddInPair ? 600 : 900;
-  toneRemoteHz = oddInPair ? 900 : 600;
+  // Read the hardwired pair and choose this board's side (tap the key during the
+  // banner), then derive the sidetone pitches from the side before the radio
+  // pipes are set up. Side A keys low and hears high; side B is reversed, so the
+  // two sides are easy to tell apart.
+  selectSide();
+  toneLocalHz = sideB ? 900 : 600;
+  toneRemoteHz = sideB ? 600 : 900;
 
   setupRadio();
 
-#if MODE_SWITCH_ENABLED
+  // Display mode is fixed at boot by the MODE_SWITCH_PIN jumper.
   modeDecoded = (digitalRead(MODE_SWITCH_PIN) == LOW);
-#else
-  modeDecoded = START_MODE_DECODED;
-#endif
   initStation(); // chooser already showed the banner; just draw the live screen
 }
 
@@ -558,7 +570,7 @@ MAIN LOOP HERE
 ************************************************ */
 void loop()
 {
-  scanControls();          // mode switch + clear button
+  scanControls();          // clear button
   transmitLocalKey();      // send the local key over the radio
   pingLink();              // idle keepalive so the link shows without keying
   receiveRemoteKey();      // receive the remote key and feed the decoder
@@ -570,7 +582,8 @@ void loop()
 END: MAIN LOOP
 ************************************************ */
 
-// Clear button soft-restarts; mode switch re-renders the existing keying.
+// Clear button soft-restarts. The mode jumper is sampled only at boot, so there
+// is nothing to poll here.
 void scanControls()
 {
   if (digitalRead(CLEAR_BUTTON) == LOW)
@@ -578,16 +591,6 @@ void scanControls()
     resetStation();
     return;
   }
-
-#if MODE_SWITCH_ENABLED
-  bool wantDecoded = (digitalRead(MODE_SWITCH_PIN) == LOW);
-  if (wantDecoded != modeDecoded)
-  {
-    modeDecoded = wantDecoded;
-    showHeader();
-    renderHistory();
-  }
-#endif
 }
 
 // Transmit the local key state to the remote unit when it changes. Mirrors the
