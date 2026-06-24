@@ -62,7 +62,9 @@ LCDI2C_Generic lcd(LCD_I2C_ADDR, LCD_COLS, LCD_ROWS);
 #define RADIO_CE_PIN 9
 #define RADIO_CSN_PIN 8
 // Pair select: two jumpers (to GND) pick which of the four links this board joins.
-// INPUT_PULLUP, so unwired = HIGH; pairIndex = (A << 1) | B. Read once at boot.
+// INPUT_PULLUP, so unwired = HIGH. The reads are inverted so unwired counts as 0:
+// nothing connected = pair 1, each jumper to GND adds to it (both = pair 4).
+// Read once at boot.
 #define PAIR_A_PIN A0 // pair select high bit
 #define PAIR_B_PIN A1 // pair select low bit
 // SPI for the radio is fixed on the Nano: D11 MOSI, D12 MISO, D13 SCK.
@@ -79,8 +81,8 @@ RF24 radio(RADIO_CE_PIN, RADIO_CSN_PIN);
 // The chooser shares the start-up banner's window (BANNER_DISPLAY_TIME) - tap
 // during the banner to flip the side, no extra boot delay.
 
-uint8_t pairIndex = 0;  // 0-3, set from the select pins in selectSide()
-bool sideB = false;     // false = side A, true = side B; persisted in EEPROM
+uint8_t pairIndex = 0; // 0-3, set from the select pins in selectSide()
+bool sideB = false;    // false = side A, true = side B; persisted in EEPROM
 
 // Two-way comms addresses, one pair per link: pair 1 uses [0]/[1], 2 uses [2]/[3],
 // 3 uses [4]/[5], 4 uses [6]/[7]. Within a pair side A writes the first address
@@ -451,8 +453,10 @@ void drawBootBanner()
 // BANNER_DISPLAY_TIME - no extra boot delay.
 void selectSide()
 {
-  // Read the hardwired pair (jumpers to GND, INPUT_PULLUP so unwired = HIGH).
-  pairIndex = (digitalRead(PAIR_A_PIN) << 1) | digitalRead(PAIR_B_PIN);
+  // Read the hardwired pair. Jumpers to GND with INPUT_PULLUP, so unwired = HIGH.
+  // Invert each read so unwired counts as 0: nothing connected = pair 1, and each
+  // jumper to GND adds to the number (both connected = 11 = pair 4).
+  pairIndex = (!digitalRead(PAIR_A_PIN) << 1) | !digitalRead(PAIR_B_PIN);
   if (pairIndex >= NUM_PAIRS)
   {
     pairIndex = 0; // guard if PAIR_CHANNELS has fewer than four entries
