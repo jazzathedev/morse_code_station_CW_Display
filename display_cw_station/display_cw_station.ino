@@ -1,5 +1,6 @@
 /**
- * A Morse code station for the Arduino, driving a 20x4 (or 16x2) character LCD.
+ * A Morse code station for the Arduino, driving a 20x4 I2C or 40x4 parallel
+ * character LCD (pick one with LCD_BACKEND below).
  *
  * A straight key wired to CODE_BUTTON is timed: short presses are dots, long
  * presses are dashes. Gaps between presses separate letters and words. Decoded
@@ -19,32 +20,69 @@
 
 #include "morse.h" // dot/dash classification + decodeMorse() lookup
 
-// LCD geometry and I2C address. Must match the physical display; the row
-// buffers and cursor positions below all derive from these.
+// --- Display backend -------------------------------------------------------
+// Set LCD_BACKEND to match the display in front of you. Everything below -
+// geometry, row buffers, cursor positions and the pin map - follows from it.
+//
+//   LCD_I2C_20X4  20x4 module on an I2C backpack (SDA A4, SCL A5).
+//   LCD_FAST_40X4 40x4 parallel module on the Green Morse code station board.
+//
+// A 40x4 panel is really two HD44780 controllers behind one glass: rows 0-1
+// belong to the first, rows 2-3 to the second, and they share every line except
+// enable, which is split into E1 and E2. LiquidCrystalFast takes both enables
+// and picks the right chip inside setCursor(), so the rest of the sketch treats
+// it as one 40x4 display. Install the LiquidCrystalFast library to build this.
+#define LCD_I2C_20X4 0
+#define LCD_FAST_40X4 1
+
+#define LCD_BACKEND LCD_FAST_40X4
+
+#if LCD_BACKEND == LCD_FAST_40X4
+
+#include <LiquidCrystalFast.h>
+
+#define LCD_COLS 40
+#define LCD_ROWS 4
+
+// (RS, RW, E1, E2, D4, D5, D6, D7)
+LiquidCrystalFast lcd(5, 6, 4, 8, 12, 11, 10, 9);
+
+// The LCD claims D4-D6 and D8-D12, so the LED and clear button move off the
+// pins the 20x4 build uses. Buzzer and key are unchanged.
+#define BUZZER_PIN 2
+#define CODE_BUTTON 3
+#define LED_PIN 7
+#define CLEAR_BUTTON A0
+
+#else
+
+#include <LCDI2C_Generic.h>
+
 #define LCD_I2C_ADDR 0x27
 #define LCD_COLS 20
 #define LCD_ROWS 4
-#define BOTTOM_ROW (LCD_ROWS - 1) // decoded text is printed on the last row
 
-#include <LCDI2C_Generic.h>
 LCDI2C_Generic lcd(LCD_I2C_ADDR, LCD_COLS, LCD_ROWS);
 
-// Wiring for a parallel (non-I2C) LCD instead of the I2C one above:
-// #include <LiquidCrystal.h>
-// LiquidCrystal lcd(2, 255, 3, 4, 5, 6, 7); // (RS, RW, E, D4, D5, D6, D7)
+#define BUZZER_PIN 2
+#define CODE_BUTTON 3
+#define LED_PIN 4
+#define CLEAR_BUTTON 5
+
+#endif
+
+#define BOTTOM_ROW (LCD_ROWS - 1) // decoded text is printed on the last row
+
+// Row 0 is the header; the rows below it scroll the decoded text.
+#define TEXT_ROWS (LCD_ROWS - 1)
 
 #define VER 1
-#define SUBVER 6
+#define SUBVER 7
 
 // Stringize VER/SUBVER so the banner can show "v1.6" without hardcoding it.
 #define STR_HELPER(x) #x
 #define STR(x) STR_HELPER(x)
 #define VERSION_STR "v" STR(VER) "." STR(SUBVER)
-
-#define BUZZER_PIN 2
-#define LED_PIN 4
-#define CODE_BUTTON 3
-#define CLEAR_BUTTON 5
 
 // Inter-symbol gap timing. Once the key has been idle this long we end the
 // current letter (LETTER_GAP_MS); idle longer still ends the word and emits a
@@ -64,25 +102,25 @@ LCDI2C_Generic lcd(LCD_I2C_ADDR, LCD_COLS, LCD_ROWS);
 #define MAX_BUTTON_PRESS_TIMES 8
 
 // How many of those symbols the live dot/dash indicator shows. Bounded by the
-// columns available to its right (dotDashActivityX .. last column).
+// columns available to its right (dotDashActivityX .. last column), so the 40
+// column display has room for a whole letter while the 20 column one does not.
+#if LCD_BACKEND == LCD_FAST_40X4
+#define DOTDASH_DISPLAY_CELLS MAX_BUTTON_PRESS_TIMES
+#else
 #define DOTDASH_DISPLAY_CELLS 6
+#endif
 
 #define BANNER_DISPLAY_TIME 3000 // 3 seconds
 
-// Row-scrolling buffers. Each holds one display row of text so it can be shifted
-// up a line at a time as new characters fill the bottom row. BLANKROW must be
-// LCD_COLS spaces wide.
-#define BLANKROW "                    "
-char blankrow[] = BLANKROW;
-char row1[] = BLANKROW;
-char row2[] = BLANKROW;
-char row3[] = BLANKROW;
-static_assert(sizeof(BLANKROW) - 1 == LCD_COLS, "BLANKROW must be LCD_COLS spaces");
+// Row-scrolling buffers: one per text row, holding what that row is showing so
+// the lot can be shifted up a line as characters fill the bottom row. rows[r]
+// is displayed on LCD row r + 1 (row 0 being the header).
+char rows[TEXT_ROWS][LCD_COLS + 1];
 
 int displayPos = 0; // current column on the bottom row
 
 // Top-right screen position for the live dot/dash activity indicator.
-const unsigned int dotDashActivityX = 14;
+const unsigned int dotDashActivityX = LCD_COLS - DOTDASH_DISPLAY_CELLS;
 const unsigned int dotDashActivityY = 0;
 
 // Key state machine:
@@ -142,6 +180,12 @@ void welcomeBanner(int waitDelay) {
   lcd.clear();
 }
 
+// Fill a row buffer with spaces, terminated so writeRow() covers every column.
+void blankRow(char *row) {
+  memset(row, ' ', LCD_COLS);
+  row[LCD_COLS] = '\0';
+}
+
 void resetSystem() {
   welcomeBanner(BANNER_DISPLAY_TIME);
 
@@ -149,9 +193,8 @@ void resetSystem() {
   lcd.print("Morse Code:");
   lcd.setCursor(0, 1);
 
-  strcpy(row1, blankrow);
-  strcpy(row2, blankrow);
-  strcpy(row3, blankrow);
+  for (int r = 0; r < TEXT_ROWS; r++)
+    blankRow(rows[r]);
   newWord = false;
   letterDecoded = true;
   displayPos = 0; // reset column where printing will start
@@ -172,8 +215,12 @@ void setup() {
   pinMode(BUZZER_PIN, OUTPUT);
   pinMode(LED_PIN, OUTPUT);
 
+#if LCD_BACKEND == LCD_FAST_40X4
+  lcd.begin(LCD_COLS, LCD_ROWS); // brings up both controllers
+#else
   lcd.init();
   lcd.backlight();
+#endif
 
   resetSystem();
 }
@@ -185,8 +232,20 @@ void writeRow(const char *s) {
     lcd.write((uint8_t)*s++);
 }
 
+// Shift every text row up one, blank the freed bottom row, and redraw them all.
+void scrollRows() {
+  for (int r = 0; r < TEXT_ROWS - 1; r++)
+    strcpy(rows[r], rows[r + 1]);
+  blankRow(rows[TEXT_ROWS - 1]);
+
+  for (int r = 0; r < TEXT_ROWS; r++) {
+    lcd.setCursor(0, r + 1);
+    writeRow(rows[r]);
+  }
+}
+
 // Print one character to the bottom row. When the row fills, scroll the text
-// rows up (row3 -> row2 -> row1) and blank the bottom row.
+// rows up and carry on at the start of the (now blank) bottom row.
 void displayChar(char ch) {
 
   if (initialChar) { // swallow the spurious first char after a reset
@@ -197,27 +256,14 @@ void displayChar(char ch) {
   lcd.setCursor(displayPos, BOTTOM_ROW);
   lcd.write((uint8_t)ch); // byte-for-byte write, no UTF-8 decoding (one cell)
 
-  row3[displayPos] = ch;
+  rows[TEXT_ROWS - 1][displayPos] = ch;
   displayPos++;
 
   if (displayPos >= LCD_COLS) { // bottom row full: scroll everything up
     Serial.println("Row full, scrolling display.");
 
     displayPos = 0;
-
-    strcpy(row1, row2);
-    strcpy(row2, row3);
-    strcpy(row3, blankrow);
-
-    lcd.setCursor(0, 1);
-    writeRow(row1);
-
-    lcd.setCursor(0, 2);
-    writeRow(row2);
-
-    lcd.setCursor(0, BOTTOM_ROW);
-    writeRow(row3); // now blank
-
+    scrollRows();
     lcd.setCursor(0, BOTTOM_ROW); // cursor back to start of bottom row
   }
 }
