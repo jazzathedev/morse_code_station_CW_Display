@@ -47,10 +47,17 @@
 #define LCD_ROWS 4
 
 // (RS, RW, E1, E2, D4, D5, D6, D7)
-LiquidCrystalFast lcd(5, 6, 4, 8, 12, 11, 10, 9);
+// RW is 255 (unused) on purpose: the busy-flag read-back this library does
+// when a real RW pin is given is timing-sensitive, and on this board it was
+// corrupting every command/character write after the initial 4-bit handshake
+// (LCD came up but only ever showed solid block characters). Tie the LCD's
+// RW pin to GND instead of wiring it to the Arduino - that forces the
+// library onto its fixed-delay write path, which is what actually works.
+LiquidCrystalFast lcd(5, 255, 4, 8, 12, 11, 10, 9);
 
-// The LCD claims D4-D6 and D8-D12, so the LED and clear button move off the
-// pins the 20x4 build uses. Buzzer and key are unchanged.
+// The LCD claims D4, D5, D7-D12 (D6 is free - RW goes to GND, not the Nano),
+// so the LED and clear button move off the pins the 20x4 build uses. Buzzer
+// and key are unchanged.
 #define BUZZER_PIN 2
 #define CODE_BUTTON 3
 #define LED_PIN 7
