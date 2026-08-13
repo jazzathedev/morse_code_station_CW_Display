@@ -31,7 +31,9 @@
 // belong to the first, rows 2-3 to the second, and they share every line except
 // enable, which is split into E1 and E2. LiquidCrystalFast takes both enables
 // and picks the right chip inside setCursor(), so the rest of the sketch treats
-// it as one 40x4 display. Install the LiquidCrystalFast library to build this.
+// it as one 40x4 display. It is not in the Arduino library index, so a copy
+// ships next to this sketch (LiquidCrystalFast.cpp/.h, LGPL 2.1) and no separate
+// install is needed.
 #define LCD_I2C_20X4 0
 #define LCD_FAST_40X4 1
 
@@ -39,7 +41,7 @@
 
 #if LCD_BACKEND == LCD_FAST_40X4
 
-#include <LiquidCrystalFast.h>
+#include "LiquidCrystalFast.h"
 
 #define LCD_COLS 40
 #define LCD_ROWS 4
