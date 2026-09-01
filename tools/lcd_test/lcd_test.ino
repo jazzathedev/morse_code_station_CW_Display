@@ -24,7 +24,8 @@
 
 LCDI2C_Generic lcd(LCD_I2C_ADDR, LCD_COLS, LCD_ROWS);
 
-void setup() {
+void setup()
+{
   Serial.begin(9600);
   Serial.println("LCD test starting");
 
@@ -41,7 +42,8 @@ void setup() {
   lcd.print("count: ");
 }
 
-void loop() {
+void loop()
+{
   static unsigned int count = 0;
 
   lcd.setCursor(7, 3);

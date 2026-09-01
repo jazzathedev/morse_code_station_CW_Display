@@ -10,24 +10,30 @@
 
 #include <Wire.h>
 
-void setup() {
+void setup()
+{
   Serial.begin(9600);
-  while (!Serial) {
+  while (!Serial)
+  {
     ; // wait for the Serial Monitor on boards that need it
   }
   Wire.begin();
   Serial.println("I2C scanner ready.");
 }
 
-void loop() {
+void loop()
+{
   int found = 0;
 
   Serial.println("Scanning...");
-  for (byte addr = 1; addr < 127; addr++) {
+  for (byte addr = 1; addr < 127; addr++)
+  {
     Wire.beginTransmission(addr);
-    if (Wire.endTransmission() == 0) { // 0 = device acknowledged
+    if (Wire.endTransmission() == 0)
+    { // 0 = device acknowledged
       Serial.print("  device at 0x");
-      if (addr < 16) {
+      if (addr < 16)
+      {
         Serial.print("0");
       }
       Serial.println(addr, HEX);
@@ -35,7 +41,8 @@ void loop() {
     }
   }
 
-  if (found == 0) {
+  if (found == 0)
+  {
     Serial.println("  none found - check SDA/SCL wiring and joints");
   }
   Serial.println();

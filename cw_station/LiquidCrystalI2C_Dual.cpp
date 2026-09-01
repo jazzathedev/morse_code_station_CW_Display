@@ -23,10 +23,10 @@
 #define LCD_SETCGRAMADDR 0x40
 #define LCD_SETDDRAMADDR 0x80
 
-#define LCD_ENTRYLEFT 0x02      // cursor moves right, display does not shift
-#define LCD_DISPLAYON 0x04      // display on, cursor off, blink off
-#define LCD_2LINE 0x08          // each controller drives two lines
-#define LCD_4BITMODE 0x00       // data arrives as two nibbles
+#define LCD_ENTRYLEFT 0x02 // cursor moves right, display does not shift
+#define LCD_DISPLAYON 0x04 // display on, cursor off, blink off
+#define LCD_2LINE 0x08     // each controller drives two lines
+#define LCD_4BITMODE 0x00  // data arrives as two nibbles
 
 // Longest instruction (clear/home) takes 1.52ms on a 270kHz part; the rest
 // settle in 37us. With R/W grounded we cannot poll the busy flag, so both are
@@ -39,7 +39,8 @@ LiquidCrystalI2C_Dual::LiquidCrystalI2C_Dual(uint8_t addr, uint8_t cols,
     : _addr(addr), _cols(cols), _rows(rows), _chips(chips == 2 ? 2 : 1),
       _chip(0), _backlightBit(BP_BL), _displaycontrol(LCD_DISPLAYON) {}
 
-uint8_t LiquidCrystalI2C_Dual::enableMask(uint8_t chip) const {
+uint8_t LiquidCrystalI2C_Dual::enableMask(uint8_t chip) const
+{
   return (chip == 1 && _chips == 2) ? BP_E2 : BP_E1;
 }
 
@@ -47,7 +48,8 @@ uint8_t LiquidCrystalI2C_Dual::enableMask(uint8_t chip) const {
 
 // Push one byte to the expander's output latch. The backlight bit rides along
 // with every write, so it stays as set regardless of what else is going on.
-void LiquidCrystalI2C_Dual::expanderWrite(uint8_t data) {
+void LiquidCrystalI2C_Dual::expanderWrite(uint8_t data)
+{
   Wire.beginTransmission(_addr);
   Wire.write(data | _backlightBit);
   Wire.endTransmission();
@@ -56,7 +58,8 @@ void LiquidCrystalI2C_Dual::expanderWrite(uint8_t data) {
 // Strobe one controller's enable line, latching whatever is on the data bus.
 // The HD44780 needs the enable high for 450ns and the data stable 10ns after it
 // falls; a 100kHz I2C byte takes ~90us, so both are met by the bus itself.
-void LiquidCrystalI2C_Dual::pulseEnable(uint8_t data, uint8_t en) {
+void LiquidCrystalI2C_Dual::pulseEnable(uint8_t data, uint8_t en)
+{
   expanderWrite(data | en);
   delayMicroseconds(1);
   expanderWrite(data & ~en);
@@ -64,23 +67,27 @@ void LiquidCrystalI2C_Dual::pulseEnable(uint8_t data, uint8_t en) {
 }
 
 // Present one nibble (already positioned in the high four bits) and strobe it.
-void LiquidCrystalI2C_Dual::write4bits(uint8_t nibble, uint8_t en) {
+void LiquidCrystalI2C_Dual::write4bits(uint8_t nibble, uint8_t en)
+{
   expanderWrite(nibble);
   pulseEnable(nibble, en);
 }
 
 // Send a full byte as two nibbles, high first. rsBit picks the register: 0 for
 // an instruction, BP_RS for character data.
-void LiquidCrystalI2C_Dual::send(uint8_t value, uint8_t rsBit, uint8_t en) {
+void LiquidCrystalI2C_Dual::send(uint8_t value, uint8_t rsBit, uint8_t en)
+{
   write4bits((value & 0xF0) | rsBit, en);
   write4bits(((value << 4) & 0xF0) | rsBit, en);
 }
 
-void LiquidCrystalI2C_Dual::commandTo(uint8_t value, uint8_t en) {
+void LiquidCrystalI2C_Dual::commandTo(uint8_t value, uint8_t en)
+{
   send(value, 0, en);
 }
 
-void LiquidCrystalI2C_Dual::command(uint8_t value) {
+void LiquidCrystalI2C_Dual::command(uint8_t value)
+{
   commandTo(value, enableMask(_chip));
 }
 
@@ -88,7 +95,8 @@ void LiquidCrystalI2C_Dual::command(uint8_t value) {
 
 // The datasheet's "initialisation by instruction" dance, which puts a controller
 // into a known 4-bit state whether it powered up cleanly or not.
-void LiquidCrystalI2C_Dual::initChip(uint8_t en) {
+void LiquidCrystalI2C_Dual::initChip(uint8_t en)
+{
   // Three 8-bit function-set nibbles force the controller into 8-bit mode from
   // any starting state, then a fourth switches it to 4-bit.
   write4bits(0x30, en);
@@ -107,7 +115,8 @@ void LiquidCrystalI2C_Dual::initChip(uint8_t en) {
   commandTo(LCD_ENTRYMODESET | LCD_ENTRYLEFT, en);
 }
 
-void LiquidCrystalI2C_Dual::begin() {
+void LiquidCrystalI2C_Dual::begin()
+{
   Wire.begin(); // harmless if the sketch has already brought the bus up
 
   // Park every output low (bar the backlight) so the enable lines start idle,
@@ -115,7 +124,8 @@ void LiquidCrystalI2C_Dual::begin() {
   expanderWrite(0);
   delay(50);
 
-  for (uint8_t chip = 0; chip < _chips; chip++) {
+  for (uint8_t chip = 0; chip < _chips; chip++)
+  {
     initChip(enableMask(chip));
   }
 
@@ -125,17 +135,21 @@ void LiquidCrystalI2C_Dual::begin() {
 
 // --- Public API --------------------------------------------------------------
 
-void LiquidCrystalI2C_Dual::clear() {
+void LiquidCrystalI2C_Dual::clear()
+{
   // Each controller owns its own DDRAM, so both have to be told.
-  for (uint8_t chip = 0; chip < _chips; chip++) {
+  for (uint8_t chip = 0; chip < _chips; chip++)
+  {
     commandTo(LCD_CLEARDISPLAY, enableMask(chip));
   }
   delay(EXEC_LONG_MS);
   _chip = 0;
 }
 
-void LiquidCrystalI2C_Dual::home() {
-  for (uint8_t chip = 0; chip < _chips; chip++) {
+void LiquidCrystalI2C_Dual::home()
+{
+  for (uint8_t chip = 0; chip < _chips; chip++)
+  {
     commandTo(LCD_RETURNHOME, enableMask(chip));
   }
   delay(EXEC_LONG_MS);
@@ -145,24 +159,31 @@ void LiquidCrystalI2C_Dual::home() {
 // Move the cursor, selecting the controller that owns the requested row. On a
 // 40x4 panel each controller is a two-line display in its own right, so rows 2
 // and 3 restart at its line 0 and line 1 addresses.
-void LiquidCrystalI2C_Dual::setCursor(uint8_t col, uint8_t row) {
-  if (row >= _rows) {
+void LiquidCrystalI2C_Dual::setCursor(uint8_t col, uint8_t row)
+{
+  if (row >= _rows)
+  {
     row = _rows - 1;
   }
-  if (col >= _cols) {
+  if (col >= _cols)
+  {
     col = _cols - 1;
   }
 
   uint8_t offset;
-  if (_chips == 2) {
-    _chip = row >> 1;               // rows 0-1 on chip 0, rows 2-3 on chip 1
+  if (_chips == 2)
+  {
+    _chip = row >> 1; // rows 0-1 on chip 0, rows 2-3 on chip 1
     offset = (row & 1) ? 0x40 : 0x00;
-  } else {
+  }
+  else
+  {
     _chip = 0;
     // Single controller: lines 0/1 live at 0x00/0x40, and a four-line module
     // wraps lines 2/3 onto the tail of each, one screen width along.
     offset = (row & 1) ? 0x40 : 0x00;
-    if (row >= 2) {
+    if (row >= 2)
+    {
       offset += _cols;
     }
   }
@@ -170,43 +191,53 @@ void LiquidCrystalI2C_Dual::setCursor(uint8_t col, uint8_t row) {
   command(LCD_SETDDRAMADDR | (offset + col));
 }
 
-size_t LiquidCrystalI2C_Dual::write(uint8_t value) {
+size_t LiquidCrystalI2C_Dual::write(uint8_t value)
+{
   send(value, BP_RS, enableMask(_chip));
   return 1;
 }
 
-void LiquidCrystalI2C_Dual::backlight() {
+void LiquidCrystalI2C_Dual::backlight()
+{
   _backlightBit = BP_BL;
   expanderWrite(0);
 }
 
-void LiquidCrystalI2C_Dual::noBacklight() {
+void LiquidCrystalI2C_Dual::noBacklight()
+{
   _backlightBit = 0;
   expanderWrite(0);
 }
 
-void LiquidCrystalI2C_Dual::display() {
+void LiquidCrystalI2C_Dual::display()
+{
   _displaycontrol |= LCD_DISPLAYON;
-  for (uint8_t chip = 0; chip < _chips; chip++) {
+  for (uint8_t chip = 0; chip < _chips; chip++)
+  {
     commandTo(LCD_DISPLAYCONTROL | _displaycontrol, enableMask(chip));
   }
 }
 
-void LiquidCrystalI2C_Dual::noDisplay() {
+void LiquidCrystalI2C_Dual::noDisplay()
+{
   _displaycontrol &= ~LCD_DISPLAYON;
-  for (uint8_t chip = 0; chip < _chips; chip++) {
+  for (uint8_t chip = 0; chip < _chips; chip++)
+  {
     commandTo(LCD_DISPLAYCONTROL | _displaycontrol, enableMask(chip));
   }
 }
 
 // Custom glyphs live in each controller's own CGRAM, so a 40x4 panel needs the
 // bitmap loaded into both or it will only render on the top half.
-void LiquidCrystalI2C_Dual::createChar(uint8_t location, const uint8_t charmap[]) {
+void LiquidCrystalI2C_Dual::createChar(uint8_t location, const uint8_t charmap[])
+{
   location &= 0x7; // only slots 0-7 exist
-  for (uint8_t chip = 0; chip < _chips; chip++) {
+  for (uint8_t chip = 0; chip < _chips; chip++)
+  {
     uint8_t en = enableMask(chip);
     commandTo(LCD_SETCGRAMADDR | (location << 3), en);
-    for (uint8_t i = 0; i < 8; i++) {
+    for (uint8_t i = 0; i < 8; i++)
+    {
       send(charmap[i], BP_RS, en);
     }
   }

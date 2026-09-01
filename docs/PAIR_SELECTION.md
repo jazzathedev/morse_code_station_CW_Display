@@ -4,7 +4,7 @@
 > onto jumpers; the work is done and shipped. Kept for the reasoning, not as a
 > reference. **[docs/WIRING.md](WIRING.md) is the authoritative pin map** and
 > wins wherever the two disagree - in particular the select pins are read
-> *inverted* (so an unjumpered board is pair 1, not pair 4), and the text-mode
+> _inverted_ (so an unjumpered board is pair 1, not pair 4), and the text-mode
 > pin is now polled live rather than sampled once at boot.
 
 Goal: stop choosing the radio pair by tapping the key at boot, and instead set it
@@ -19,7 +19,7 @@ Drop the flat 1..8 unit numbering. A board is identified by its **pair** (1-4)
 plus its **side** (A or B):
 
 | Old unit | New name | Pair | Side |
-|----------|----------|------|------|
+| -------- | -------- | ---- | ---- |
 | 1        | 1A       | 1    | A    |
 | 2        | 1B       | 1    | B    |
 | 3        | 2A       | 2    | A    |
@@ -37,8 +37,8 @@ Two digital pins choose the pair, on **A0 (a) and A1 (b)**, used as plain digita
 inputs. Wired `INPUT_PULLUP` + jumper to GND (no extra parts): a pin reads HIGH
 unwired and LOW when jumpered. Truth table:
 
-| pin a | pin b | pair |
-|-------|-------|------|
+| pin a | pin b | pair           |
+| ----- | ----- | -------------- |
 | low   | low   | 1 (channel 76) |
 | low   | high  | 2 (channel 40) |
 | high  | low   | 3 (channel 8)  |

@@ -39,17 +39,20 @@ LiquidCrystalI2C_Dual lcd(LCD_I2C_ADDR, LCD_COLS, LCD_ROWS, 2);
 
 #define STEP_MS 4000
 
-void banner(const char *what) {
+void banner(const char *what)
+{
   Serial.print(F("--- "));
   Serial.println(what);
 }
 
 // Every row labelled with its number and which controller owns it. This is the
 // test that actually matters.
-void testRows() {
+void testRows()
+{
   banner("labelled rows");
   lcd.clear();
-  for (uint8_t r = 0; r < LCD_ROWS; r++) {
+  for (uint8_t r = 0; r < LCD_ROWS; r++)
+  {
     lcd.setCursor(0, r);
     lcd.print(F("ROW "));
     lcd.print(r);
@@ -60,12 +63,15 @@ void testRows() {
 
 // A ruler across all 40 columns, so a stuck data line or a short shows up as a
 // gap or a repeated digit.
-void testColumns() {
+void testColumns()
+{
   banner("column ruler");
   lcd.clear();
-  for (uint8_t r = 0; r < LCD_ROWS; r++) {
+  for (uint8_t r = 0; r < LCD_ROWS; r++)
+  {
     lcd.setCursor(0, r);
-    for (uint8_t c = 0; c < LCD_COLS; c++) {
+    for (uint8_t c = 0; c < LCD_COLS; c++)
+    {
       // 0123456789 repeating, with every tenth column marked.
       lcd.write((c % 10 == 0) ? '|' : (char)('0' + (c % 10)));
     }
@@ -74,12 +80,15 @@ void testColumns() {
 
 // Fill every cell. Any cell that stays blank is a cell the driver never
 // addressed; any that stays black is a cell that never got data.
-void testFill() {
+void testFill()
+{
   banner("full fill");
   lcd.clear();
-  for (uint8_t r = 0; r < LCD_ROWS; r++) {
+  for (uint8_t r = 0; r < LCD_ROWS; r++)
+  {
     lcd.setCursor(0, r);
-    for (uint8_t c = 0; c < LCD_COLS; c++) {
+    for (uint8_t c = 0; c < LCD_COLS; c++)
+    {
       lcd.write((uint8_t)('A' + ((r * LCD_COLS + c) % 26)));
     }
   }
@@ -87,14 +96,16 @@ void testFill() {
 
 // Prove clear() reaches both controllers. If the bottom two rows keep their
 // text here, clear() is only landing on chip 1.
-void testClear() {
+void testClear()
+{
   banner("clear both chips (screen should go blank)");
   lcd.clear();
   lcd.setCursor(0, 0);
   lcd.print(F("cleared - rows 1-3 should be blank"));
 }
 
-void setup() {
+void setup()
+{
   Serial.begin(9600);
   Serial.println(F("40x4 I2C LCD test"));
   Serial.print(F("address 0x"));
@@ -107,7 +118,8 @@ void setup() {
   lcd.backlight();
 }
 
-void loop() {
+void loop()
+{
   testRows();
   delay(STEP_MS);
   testColumns();

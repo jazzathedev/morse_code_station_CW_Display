@@ -39,7 +39,8 @@
 // (RS, RW, E1, E2, D4, D5, D6, D7)
 LiquidCrystalFast lcd(5, 6, 4, 8, 12, 11, 10, 9);
 
-void setup() {
+void setup()
+{
   Serial.begin(9600);
   Serial.print("40x4 LCD phase test starting, TEST_PHASE=");
   Serial.println(TEST_PHASE);
@@ -70,6 +71,7 @@ void setup() {
 #endif
 }
 
-void loop() {
+void loop()
+{
   // Nothing here on purpose - what setup() drew is the whole test.
 }

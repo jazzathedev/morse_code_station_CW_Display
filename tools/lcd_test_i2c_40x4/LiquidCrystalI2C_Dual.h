@@ -26,7 +26,8 @@
 #include <Arduino.h>
 #include <Print.h>
 
-class LiquidCrystalI2C_Dual : public Print {
+class LiquidCrystalI2C_Dual : public Print
+{
 public:
   // chips = 1 for a normal single-controller module, 2 for a 40x4 panel whose
   // E2 line is driven from the backpack's P1 output.

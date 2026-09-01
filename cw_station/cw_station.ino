@@ -294,18 +294,22 @@ uint8_t history[MAX_HISTORY];
 int historyCount = 0;
 
 // Pack a ".-" style pattern string into the byte form described above.
-uint8_t packPattern(const char *pattern) {
+uint8_t packPattern(const char *pattern)
+{
   uint8_t v = 1; // leading sentinel bit
-  for (const char *p = pattern; *p; p++) {
+  for (const char *p = pattern; *p; p++)
+  {
     v = (v << 1) | (*p == '-' ? 1 : 0);
   }
   return v;
 }
 
 // Number of symbols in a packed pattern: every bit below the sentinel.
-uint8_t patternLength(uint8_t v) {
+uint8_t patternLength(uint8_t v)
+{
   uint8_t n = 0;
-  while (v > 1) {
+  while (v > 1)
+  {
     v >>= 1;
     n++;
   }
@@ -314,17 +318,20 @@ uint8_t patternLength(uint8_t v) {
 
 // Expand a packed pattern back into a ".-" string. `out` needs MAX_PATTERN + 1
 // bytes.
-void unpackPattern(uint8_t v, char *out) {
+void unpackPattern(uint8_t v, char *out)
+{
   uint8_t n = patternLength(v);
   out[n] = '\0';
-  for (uint8_t i = n; i > 0; i--) {
+  for (uint8_t i = n; i > 0; i--)
+  {
     out[i - 1] = (v & 1) ? '-' : '.';
     v >>= 1;
   }
 }
 
 // Decode a packed pattern straight to its character.
-char decodePacked(uint8_t v) {
+char decodePacked(uint8_t v)
+{
   char pattern[MAX_PATTERN + 1];
   unpackPattern(v, pattern);
   return decodeMorsePattern(pattern);
@@ -366,13 +373,15 @@ unsigned long lastTextSwitchChange = 0;
 
 // Flash both LEDs (and show RADIO FAULT) for PANIC_BLINK_MS, then return so the
 // caller can retry. Not a permanent lockup - a radio that comes good recovers.
-void panic() {
+void panic()
+{
   lcd.clear();
   lcd.setCursor(0, 0);
   lcd.print(F("RADIO FAULT"));
 
   unsigned long start = millis();
-  while (millis() - start < PANIC_BLINK_MS) {
+  while (millis() - start < PANIC_BLINK_MS)
+  {
     digitalWrite(CONFIRM_LED_PIN, HIGH);
     digitalWrite(STATUS_LED_PIN, HIGH);
     delay(100);
@@ -382,10 +391,12 @@ void panic() {
   }
 }
 
-void setupRadio() {
+void setupRadio()
+{
   // Keep retrying instead of bricking: panic() flashes for its timeout, then we
   // loop and try again, so the unit recovers once the module is reachable.
-  while (!radio.begin()) {
+  while (!radio.begin())
+  {
     Serial.println(F("Radio init FAILED"));
     panic();
   }
@@ -395,10 +406,13 @@ void setupRadio() {
   // 3 -> [4]/[5], 4 -> [6]/[7]. Side A writes the first address and reads the
   // second; side B is the mirror image.
   uint8_t pairBase = pairIndex * 2;
-  if (!sideB) {
+  if (!sideB)
+  {
     radio.openWritingPipe(ADDRESS[pairBase]);
     radio.openReadingPipe(1, ADDRESS[pairBase + 1]);
-  } else {
+  }
+  else
+  {
     radio.openWritingPipe(ADDRESS[pairBase + 1]);
     radio.openReadingPipe(1, ADDRESS[pairBase]);
   }
@@ -418,10 +432,12 @@ void setupRadio() {
 // Header link indicator: the two-arrow glyph right after the label while the
 // peer has been heard recently, blank once the link falls quiet. Touches the LCD
 // only on a state change, so it is cheap to poll every loop.
-void showLinkIndicator() {
+void showLinkIndicator()
+{
   bool linked = lastLinkActivity != 0 &&
                 (millis() - lastLinkActivity) < LINK_TIMEOUT_MS;
-  if (linked == linkShown) {
+  if (linked == linkShown)
+  {
     return;
   }
   linkShown = linked;
@@ -433,11 +449,13 @@ void showLinkIndicator() {
 // Header row: identity and mode on the left, live dot/dash indicator on the
 // right. A wireless unit prefixes its pair/side ("1A CW"); a display unit has no
 // pair to name, so it is just "CW".
-void showHeader() {
+void showHeader()
+{
   lcd.setCursor(0, HEADER_ROW);
   uint8_t col = 0;
 
-  if (wirelessMode) {
+  if (wirelessMode)
+  {
     lcd.print(pairLabel());
     lcd.write(sideChar());
     lcd.write(' ');
@@ -445,7 +463,8 @@ void showHeader() {
   }
   lcd.print(F("CW"));
   col += 2;
-  if (textMode) {
+  if (textMode)
+  {
     lcd.print(F(" TEXT"));
     col += 5;
   }
@@ -453,37 +472,45 @@ void showHeader() {
 
   // Blank the gap between the label and the live dot/dash area, then force the
   // link glyph to redraw - the header may have just been cleared.
-  while (col < dotDashActivityX) {
+  while (col < dotDashActivityX)
+  {
     lcd.write(' ');
     col++;
   }
   linkShown = false;
-  if (wirelessMode) {
+  if (wirelessMode)
+  {
     showLinkIndicator();
   }
 }
 
 // Show the symbols of the letter currently being keyed, top-right.
-void showActivity() {
+void showActivity()
+{
   lcd.setCursor(dotDashActivityX, HEADER_ROW);
-  for (uint8_t i = 0; i < DOTDASH_DISPLAY_CELLS; i++) {
+  for (uint8_t i = 0; i < DOTDASH_DISPLAY_CELLS; i++)
+  {
     char sym = i < patternLen ? currentPattern[i] : ' ';
     lcd.write((uint8_t)(sym == '.' ? GLYPH_DOT : sym));
   }
 }
 
-void clearActivity() {
+void clearActivity()
+{
   patternLen = 0;
   currentPattern[0] = '\0';
   showActivity();
 }
 
 // Width in display cells of history entry i in the current mode.
-uint8_t entryWidth(int i) {
-  if (textMode) {
+uint8_t entryWidth(int i)
+{
+  if (textMode)
+  {
     return 1; // a single letter, or a single space for a word gap
   }
-  if (history[i] <= HIST_WORD_GAP) {
+  if (history[i] <= HIST_WORD_GAP)
+  {
     return 2; // "/ "
   }
   return patternLength(history[i]) + 1; // pattern plus its separating space
@@ -491,15 +518,18 @@ uint8_t entryWidth(int i) {
 
 // Re-render the content rows from the history buffer for the current mode,
 // showing the most recent entries that fit.
-void renderHistory() {
+void renderHistory()
+{
   const int cells = LCD_COLS * CONTENT_ROWS;
 
   // Walk back from the newest entry until the tail no longer fits.
   int start = historyCount;
   int total = 0;
-  for (int i = historyCount - 1; i >= 0; i--) {
+  for (int i = historyCount - 1; i >= 0; i--)
+  {
     int w = entryWidth(i);
-    if (total + w > cells) {
+    if (total + w > cells)
+    {
       break;
     }
     total += w;
@@ -510,24 +540,33 @@ void renderHistory() {
   char buf[LCD_COLS * CONTENT_ROWS];
   memset(buf, ' ', sizeof(buf));
   int pos = 0;
-  for (int i = start; i < historyCount && pos < cells; i++) {
+  for (int i = start; i < historyCount && pos < cells; i++)
+  {
     uint8_t v = history[i];
     bool gap = (v <= HIST_WORD_GAP);
 
-    if (textMode) {
+    if (textMode)
+    {
       buf[pos++] = gap ? ' ' : decodePacked(v);
-    } else if (gap) {
+    }
+    else if (gap)
+    {
       buf[pos++] = '/';
-      if (pos < cells) {
+      if (pos < cells)
+      {
         buf[pos++] = ' ';
       }
-    } else {
+    }
+    else
+    {
       char pattern[MAX_PATTERN + 1];
       unpackPattern(v, pattern);
-      for (const char *p = pattern; *p && pos < cells; p++) {
+      for (const char *p = pattern; *p && pos < cells; p++)
+      {
         buf[pos++] = (*p == '.') ? (char)GLYPH_DOT : *p;
       }
-      if (pos < cells) {
+      if (pos < cells)
+      {
         buf[pos++] = ' ';
       }
     }
@@ -535,17 +574,21 @@ void renderHistory() {
 
   // Byte-for-byte write so each stored byte maps to exactly one display cell,
   // bypassing Print's UTF-8 handling.
-  for (int r = 0; r < CONTENT_ROWS; r++) {
+  for (int r = 0; r < CONTENT_ROWS; r++)
+  {
     lcd.setCursor(0, HEADER_ROW + 1 + r);
-    for (int c = 0; c < LCD_COLS; c++) {
+    for (int c = 0; c < LCD_COLS; c++)
+    {
       lcd.write((uint8_t)buf[r * LCD_COLS + c]);
     }
   }
 }
 
 // Append a history entry, dropping the oldest if the buffer is full.
-void pushHistory(uint8_t packed) {
-  if (historyCount >= MAX_HISTORY) {
+void pushHistory(uint8_t packed)
+{
+  if (historyCount >= MAX_HISTORY)
+  {
     memmove(&history[0], &history[1], MAX_HISTORY - 1);
     historyCount = MAX_HISTORY - 1;
   }
@@ -554,7 +597,8 @@ void pushHistory(uint8_t packed) {
 
 // Boot banner. Names the station mode, so the mode switch setting is readable
 // without a serial monitor, and the pair/side when there is one.
-void drawBanner(bool showTapHint) {
+void drawBanner(bool showTapHint)
+{
   lcd.clear();
   lcd.setCursor(0, 0);
   lcd.print(F(" -- SCOUTS WA --"));
@@ -562,18 +606,22 @@ void drawBanner(bool showTapHint) {
   lcd.print(wirelessMode ? F(" Wireless CW ") : F(" Display CW "));
   lcd.print(F(VERSION_STR));
   lcd.setCursor(0, 2);
-  if (wirelessMode) {
+  if (wirelessMode)
+  {
     lcd.print(F(" Unit "));
     lcd.print(pairLabel());
     lcd.write(sideChar());
-  } else {
+  }
+  else
+  {
     lcd.print(F(" Local key"));
   }
   lcd.setCursor(0, 3);
   lcd.print(showTapHint ? F("Tap key: side A/B") : F("By VK6TU/VK6XM"));
 }
 
-void welcomeBanner(int waitDelay) {
+void welcomeBanner(int waitDelay)
+{
   drawBanner(false);
   delay(waitDelay);
   lcd.clear();
@@ -586,12 +634,14 @@ void welcomeBanner(int waitDelay) {
 // cycles, and confirmed with a beep (one for A, two for B) so it is readable
 // even with no display. Runs before the radio listens, so taps don't transmit.
 // Shares BANNER_DISPLAY_TIME - no extra boot delay.
-void selectSide() {
+void selectSide()
+{
   // Jumpers to GND with INPUT_PULLUP, so unwired = HIGH. Invert each read so
   // unwired counts as 0: nothing connected = pair 1, and each jumper to GND adds
   // to the number (both connected = 11 = pair 4).
   pairIndex = (!digitalRead(PAIR_A_PIN) << 1) | !digitalRead(PAIR_B_PIN);
-  if (pairIndex >= NUM_PAIRS) {
+  if (pairIndex >= NUM_PAIRS)
+  {
     pairIndex = 0; // guard if PAIR_CHANNELS has fewer than four entries
   }
 
@@ -605,11 +655,13 @@ void selectSide() {
   // restarts the window, so it confirms 3s after the last press.
   bool prevKey = HIGH; // active-low key, idle HIGH
   unsigned long lastActivity = millis();
-  while (millis() - lastActivity < BANNER_DISPLAY_TIME) {
+  while (millis() - lastActivity < BANNER_DISPLAY_TIME)
+  {
     bool k = digitalRead(KEY_PIN);
-    if (prevKey == HIGH && k == LOW) { // falling edge = a tap
-      sideB = !sideB;                  // flip A <-> B
-      tone(BUZZER_PIN, 880, 60);       // short tap blip
+    if (prevKey == HIGH && k == LOW)
+    {                            // falling edge = a tap
+      sideB = !sideB;            // flip A <-> B
+      tone(BUZZER_PIN, 880, 60); // short tap blip
       drawBanner(true);
       lastActivity = millis(); // restart the window from this tap
       delay(50);               // debounce the tap
@@ -617,13 +669,15 @@ void selectSide() {
     prevKey = k;
   }
 
-  if (sideB != startSide) {
+  if (sideB != startSide)
+  {
     EEPROM.update(SIDE_EEPROM_ADDR, sideB ? 1 : 0); // only writes on change
   }
 
   // Confirm the landing side: one beep/blink for A, two for B.
   uint8_t beeps = sideB ? 2 : 1;
-  for (uint8_t i = 0; i < beeps; i++) {
+  for (uint8_t i = 0; i < beeps; i++)
+  {
     digitalWrite(CONFIRM_LED_PIN, HIGH);
     tone(BUZZER_PIN, 660, 120);
     delay(180);
@@ -634,7 +688,8 @@ void selectSide() {
 #endif // RADIO_AVAILABLE
 
 // Reset operating state and draw the live screen, without the banner.
-void initStation() {
+void initStation()
+{
   historyCount = 0;
   patternLen = 0;
   currentPattern[0] = '\0';
@@ -654,12 +709,14 @@ void initStation() {
 }
 
 // Soft restart (clear button): show the banner, then reset state.
-void resetStation() {
+void resetStation()
+{
   welcomeBanner(BANNER_DISPLAY_TIME);
   initStation();
 }
 
-void setup() {
+void setup()
+{
   Serial.begin(9600); // serial debug output
 
   // Every control is an active-low switch to GND on the internal pull-up.
@@ -699,7 +756,8 @@ void setup() {
   Serial.println(wirelessMode ? F("Mode: WIRELESS") : F("Mode: DISPLAY"));
 
 #if RADIO_AVAILABLE
-  if (wirelessMode) {
+  if (wirelessMode)
+  {
     // Read the hardwired pair and choose this board's side (tap the key during
     // the banner), then derive the sidetone pitches from the side before the
     // radio pipes are set up. Side A keys low and hears high; side B is
@@ -708,7 +766,8 @@ void setup() {
     toneLocalHz = sideB ? 900 : 600;
     toneRemoteHz = sideB ? 600 : 900;
     setupRadio();
-  } else
+  }
+  else
 #endif
   {
     // A display station has no side to choose, so it just shows the banner.
@@ -723,12 +782,14 @@ void setup() {
 /* ***********************************************
 MAIN LOOP HERE
 ************************************************ */
-void loop() {
+void loop()
+{
   scanControls();    // clear button and the live text-mode switch
   serviceLocalKey(); // transmit it (wireless) or decode it (display)
 
 #if RADIO_AVAILABLE
-  if (wirelessMode) {
+  if (wirelessMode)
+  {
     pingLink();              // idle keepalive so the link shows without keying
     receiveRemoteKey();      // receive the remote key and feed the decoder
     releaseStuckRemoteKey(); // recover if a key-up packet was lost
@@ -745,8 +806,10 @@ END: MAIN LOOP
 // Clear button and text-mode switch. The station-mode switch is deliberately
 // boot-only: swapping a unit between wireless and standalone mid-session would
 // mean tearing down and re-initialising the radio underneath a live QSO.
-void scanControls() {
-  if (digitalRead(CLEAR_BUTTON) == LOW) {
+void scanControls()
+{
+  if (digitalRead(CLEAR_BUTTON) == LOW)
+  {
     resetStation();
     return;
   }
@@ -754,17 +817,20 @@ void scanControls() {
   // Text mode is live: flipping the switch re-renders the buffer that is
   // already on screen, so what has been keyed can be read either way.
   bool reading = digitalRead(TEXT_MODE_PIN);
-  if (reading != rawTextSwitch) {
+  if (reading != rawTextSwitch)
+  {
     rawTextSwitch = reading;
     lastTextSwitchChange = millis();
     return;
   }
-  if (millis() - lastTextSwitchChange < MODE_DEBOUNCE_MS) {
+  if (millis() - lastTextSwitchChange < MODE_DEBOUNCE_MS)
+  {
     return;
   }
 
   bool wanted = (reading == LOW);
-  if (wanted != textMode) {
+  if (wanted != textMode)
+  {
     textMode = wanted;
     showHeader(); // the label's width changes with the mode
     renderHistory();
@@ -776,19 +842,22 @@ void scanControls() {
 // funnel through these two, so the decode and render path is identical either
 // way. The caller owns the LED and sidetone; these only touch decode state.
 
-void decoderKeyDown() {
+void decoderKeyDown()
+{
   keyDownStart = millis();
   lastKeyActivity = keyDownStart;
 }
 
-void decoderKeyUp() {
+void decoderKeyUp()
+{
   unsigned long held = millis() - keyDownStart;
   lastKeyActivity = millis();
 
   // Classify the held duration; anything too short to be a dot is dropped as
   // bounce. A real symbol extends the current letter and updates the indicator.
   char sym = symbolFor(held);
-  if (sym != '\0' && patternLen < MAX_PATTERN) {
+  if (sym != '\0' && patternLen < MAX_PATTERN)
+  {
     currentPattern[patternLen++] = sym;
     currentPattern[patternLen] = '\0';
     letterPending = true;
@@ -799,14 +868,18 @@ void decoderKeyUp() {
 
 // A gap past WORD_GAP_MS ends a word (insert a space). A shorter gap past
 // LETTER_GAP_MS ends the current letter (commit its pattern).
-void updateDecodeTiming() {
+void updateDecodeTiming()
+{
   unsigned long idle = millis() - lastKeyActivity;
 
-  if (idle > WORD_GAP_MS && wordPending) {
+  if (idle > WORD_GAP_MS && wordPending)
+  {
     pushHistory(HIST_WORD_GAP);
     wordPending = false;
     renderHistory();
-  } else if (idle > LETTER_GAP_MS && letterPending) {
+  }
+  else if (idle > LETTER_GAP_MS && letterPending)
+  {
     pushHistory(packPattern(currentPattern));
     letterPending = false;
     clearActivity();
@@ -820,29 +893,34 @@ void updateDecodeTiming() {
 // state goes out over the radio and only the sidetone/LED stay local; in display
 // mode it drives the decoder directly. Mirrors the cw-send-receive radio sketch
 // for the transmit half: debounce, half-duplex lockout, TX confirmation.
-void serviceLocalKey() {
+void serviceLocalKey()
+{
   bool reading = digitalRead(KEY_PIN);
   unsigned long now = millis();
 
-  if (reading != rawKeyState) {
+  if (reading != rawKeyState)
+  {
     lastDebounce = now;
     rawKeyState = reading;
   }
 
 #if RADIO_AVAILABLE
   // Don't transmit just after receiving, so the two units take turns.
-  if (wirelessMode && now - timeOfLastReceive < RX_TX_LOCKOUT_MS) {
+  if (wirelessMode && now - timeOfLastReceive < RX_TX_LOCKOUT_MS)
+  {
     return;
   }
 #endif
 
   if ((now - lastDebounce) > DEBOUNCE_THRESHOLD_MS &&
-      reading != debouncedKeyState) {
+      reading != debouncedKeyState)
+  {
     debouncedKeyState = reading;
     bool down = (debouncedKeyState == LOW); // active-low key: LOW = pressed
 
 #if RADIO_AVAILABLE
-    if (wirelessMode) {
+    if (wirelessMode)
+    {
       radio.stopListening(); // leave RX only for the actual transmit
       bool txOk = radio.write(&debouncedKeyState, sizeof(debouncedKeyState));
       radio.startListening();
@@ -852,25 +930,33 @@ void serviceLocalKey() {
       Serial.println(txOk ? F("TX ok") : F("TX FAILED"));
 
       // An ack means the peer is alive and in range - keep the link glyph lit.
-      if (txOk) {
+      if (txOk)
+      {
         lastLinkActivity = millis();
       }
-    } else
+    }
+    else
 #endif
     {
       // Display station: the local key is the only source, so feed the decoder.
-      if (down) {
+      if (down)
+      {
         decoderKeyDown();
-      } else {
+      }
+      else
+      {
         decoderKeyUp();
       }
     }
 
     // Sidetone and the yellow LED follow the local key in both modes.
-    if (down) {
+    if (down)
+    {
       digitalWrite(CONFIRM_LED_PIN, HIGH);
       tone(BUZZER_PIN, toneLocalHz);
-    } else {
+    }
+    else
+    {
       digitalWrite(CONFIRM_LED_PIN, LOW);
       noTone(BUZZER_PIN);
     }
@@ -886,16 +972,19 @@ void serviceLocalKey() {
 // so the header link glyph reflects the actual radio link, not just whether we
 // happen to be transmitting. The ping carries PKT_PING so the peer counts it as
 // link activity without treating it as a key event. Its ack lights our own link.
-void pingLink() {
+void pingLink()
+{
   unsigned long now = millis();
-  if (now - lastPing < LINK_PING_MS) {
+  if (now - lastPing < LINK_PING_MS)
+  {
     return;
   }
 
   // Stay off the air while either key is down or during the post-RX lockout, so
   // keepalives never talk over real keying.
   if (debouncedKeyState == LOW || rxKeyDown ||
-      now - timeOfLastReceive < RX_TX_LOCKOUT_MS) {
+      now - timeOfLastReceive < RX_TX_LOCKOUT_MS)
+  {
     return;
   }
 
@@ -904,14 +993,17 @@ void pingLink() {
   radio.stopListening();
   bool ok = radio.write(&ping, sizeof(ping));
   radio.startListening();
-  if (ok) {
+  if (ok)
+  {
     lastLinkActivity = now;
   }
 }
 
 // Receive the remote key state and drive the LED, sidetone and decoder.
-void receiveRemoteKey() {
-  if (!radio.available()) {
+void receiveRemoteKey()
+{
+  if (!radio.available())
+  {
     return;
   }
 
@@ -923,7 +1015,8 @@ void receiveRemoteKey() {
 
   // A keepalive ping carries no key event and must not start the turn-taking
   // lockout, or a steadily-pinging idle peer would jam our own keying.
-  if (rxByte == PKT_PING) {
+  if (rxByte == PKT_PING)
+  {
     return;
   }
 
@@ -932,11 +1025,14 @@ void receiveRemoteKey() {
   Serial.println(rxByte);
 
   bool down = (rxByte == LOW); // active-low key: LOW = remote key down
-  if (down && !rxKeyDown) {
+  if (down && !rxKeyDown)
+  {
     digitalWrite(STATUS_LED_PIN, HIGH);
     tone(BUZZER_PIN, toneRemoteHz);
     decoderKeyDown();
-  } else if (!down && rxKeyDown) {
+  }
+  else if (!down && rxKeyDown)
+  {
     digitalWrite(STATUS_LED_PIN, LOW);
     noTone(BUZZER_PIN);
     decoderKeyUp();
@@ -948,8 +1044,10 @@ void receiveRemoteKey() {
 // buzzer/LED on. Once it has been held longer than any real element, drop it.
 // The runaway duration isn't a valid dot/dash, so we discard it rather than
 // record a bogus symbol.
-void releaseStuckRemoteKey() {
-  if (rxKeyDown && (millis() - keyDownStart > STUCK_KEY_MS)) {
+void releaseStuckRemoteKey()
+{
+  if (rxKeyDown && (millis() - keyDownStart > STUCK_KEY_MS))
+  {
     rxKeyDown = false;
     lastKeyActivity = millis();
     digitalWrite(STATUS_LED_PIN, LOW);
