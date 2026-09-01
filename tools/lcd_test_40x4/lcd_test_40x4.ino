@@ -6,8 +6,8 @@
  * lcd.clear() are okay, and our station sketch's welcomeBanner() does both
  * of those things as the very first thing put on screen.
  *
- * Pick ONE phase with TEST_PHASE below, flash, and see what shows up.
- * Nothing after setup() touches the LCD again, so what you see is exactly
+ * Pick ONE phase with TEST_PHASE below, flash, and read the result.
+ * Nothing after setup() touches the LCD again, so the screen shows exactly
  * what that phase produced - no cycling to confuse the picture.
  *
  *   PHASE_ROWS_01   rows 0-1 only (E1 chip), no clear() call at all - same
@@ -24,7 +24,7 @@
  * here too, it's back to a wiring/library-level problem rather than
  * anything in the station sketch's logic.
  *
- * Wiring: same as display_cw_station's 40x4 backend -
+ * Wiring: same as cw_station's LCD_FAST_40X4 backend -
  *   D5 RS, D6 R/W, D4 E1, D8 E2, D12 D4, D11 D5, D10 D6, D9 D7
  */
 

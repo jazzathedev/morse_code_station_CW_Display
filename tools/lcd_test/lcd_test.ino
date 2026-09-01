@@ -3,10 +3,10 @@
  * address and constructor as the station sketches, so it isolates the display.
  *
  * Flash it and watch the LCD:
- *   - If you see the four labelled rows and a counter ticking on the bottom row,
- *     the LCD + wiring + library are all good, and any black-boxes problem in the
+ *   - Four labelled rows plus a counter ticking on the bottom row means the LCD,
+ *     wiring and library are all good, and any black-boxes problem in the
  *     station sketch is elsewhere.
- *   - If you still get black boxes here, the HD44780 isn't being initialised even
+ *   - Black boxes here mean the HD44780 isn't being initialised even
  *     though the I2C backpack answers at 0x27. That's almost always a hardware
  *     joint between the backpack and the LCD's 16-pin header (E or a data line),
  *     or a backpack with a non-standard pin mapping. Reflow those header pins and

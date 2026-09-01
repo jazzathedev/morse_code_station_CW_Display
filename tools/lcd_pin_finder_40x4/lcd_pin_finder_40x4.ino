@@ -23,7 +23,7 @@
  * hit Send. The sketch stops advancing and reprints the winning combo.
  * Reset the board to resume scanning from the start.
  *
- * Wiring: display_cw_station's 40x4 backend, ported to pins 2,3,4,5,6,7,10,11
+ * Wiring: cw_station's LCD_FAST_40X4 backend, ported to pins 2,3,4,5,6,7,10,11
  * (role assignment unconfirmed - that's what this sketch is for).
  */
 
