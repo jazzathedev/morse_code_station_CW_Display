@@ -61,6 +61,13 @@
 
 #define LCD_BACKEND LCD_I2C_40X4
 
+// LCD command pacing, applied via setExecDelays() in setup(). Older/slower
+// HD44780 controllers need far more than the datasheet minimums - probed
+// 250us/10ms on one old 20x4 (tools/lcd_timing_probe). Tune here, not in the
+// driver.
+#define LCD_EXEC_SHORT_US 250 // per-nibble settle (us)
+#define LCD_EXEC_LONG_MS 10   // clear/home wait (ms)
+
 // The parallel backend claims the pins the radio needs, so a board built that
 // way can only ever be a display station.
 #if LCD_BACKEND == LCD_FAST_40X4
@@ -740,6 +747,7 @@ void setup()
   // writes to an absent LCD are just NACKed and ignored.
   Wire.begin();
   Wire.setWireTimeout(25000, true); // 25ms, reset the bus on timeout
+  lcd.setExecDelays(LCD_EXEC_SHORT_US, LCD_EXEC_LONG_MS);
   lcd.init();
   lcd.backlight();
 #endif

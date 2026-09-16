@@ -28,16 +28,26 @@
 #define LCD_2LINE 0x08     // each controller drives two lines
 #define LCD_4BITMODE 0x00  // data arrives as two nibbles
 
-// Longest instruction (clear/home) takes 1.52ms on a 270kHz part; the rest
-// settle in 37us. With R/W grounded we cannot poll the busy flag, so both are
-// waited out with a margin.
-#define EXEC_SHORT_US 50
-#define EXEC_LONG_MS 2
+// Defaults for setExecDelays(). Datasheet numbers assume a 270kHz controller
+// clock: clear/home take 1.52ms, everything else 37us. Older panels run a much
+// slower oscillator and need far longer - probed on one old 20x4
+// (tools/lcd_timing_probe): 50us settle fails outright, 250us works, and even
+// a 5ms clear proved borderline, so both carry a generous margin. With R/W
+// grounded the busy flag can never be polled, so every operation is waited out.
+#define EXEC_SHORT_US 250
+#define EXEC_LONG_MS 10
 
 LiquidCrystalI2C_Dual::LiquidCrystalI2C_Dual(uint8_t addr, uint8_t cols,
                                              uint8_t rows, uint8_t chips)
     : _addr(addr), _cols(cols), _rows(rows), _chips(chips == 2 ? 2 : 1),
-      _chip(0), _backlightBit(BP_BL), _displaycontrol(LCD_DISPLAYON) {}
+      _chip(0), _backlightBit(BP_BL), _displaycontrol(LCD_DISPLAYON),
+      _execShortUs(EXEC_SHORT_US), _execLongMs(EXEC_LONG_MS) {}
+
+void LiquidCrystalI2C_Dual::setExecDelays(uint16_t shortUs, uint16_t longMs)
+{
+  _execShortUs = shortUs;
+  _execLongMs = longMs;
+}
 
 uint8_t LiquidCrystalI2C_Dual::enableMask(uint8_t chip) const
 {
@@ -63,7 +73,7 @@ void LiquidCrystalI2C_Dual::pulseEnable(uint8_t data, uint8_t en)
   expanderWrite(data | en);
   delayMicroseconds(1);
   expanderWrite(data & ~en);
-  delayMicroseconds(EXEC_SHORT_US);
+  delayMicroseconds(_execShortUs);
 }
 
 // Present one nibble (already positioned in the high four bits) and strobe it.
@@ -111,7 +121,7 @@ void LiquidCrystalI2C_Dual::initChip(uint8_t en)
   commandTo(LCD_FUNCTIONSET | LCD_4BITMODE | LCD_2LINE, en);
   commandTo(LCD_DISPLAYCONTROL | _displaycontrol, en);
   commandTo(LCD_CLEARDISPLAY, en);
-  delay(EXEC_LONG_MS);
+  delay(_execLongMs);
   commandTo(LCD_ENTRYMODESET | LCD_ENTRYLEFT, en);
 }
 
@@ -142,7 +152,7 @@ void LiquidCrystalI2C_Dual::clear()
   {
     commandTo(LCD_CLEARDISPLAY, enableMask(chip));
   }
-  delay(EXEC_LONG_MS);
+  delay(_execLongMs);
   _chip = 0;
 }
 
@@ -152,7 +162,7 @@ void LiquidCrystalI2C_Dual::home()
   {
     commandTo(LCD_RETURNHOME, enableMask(chip));
   }
-  delay(EXEC_LONG_MS);
+  delay(_execLongMs);
   _chip = 0;
 }
 

@@ -37,6 +37,10 @@ public:
   void begin();
   void init() { begin(); } // alias, matching the LiquidCrystal_I2C-style API
 
+  // Pacing for slow/older controllers. Defaults already suit slow panels
+  // (see EXEC_* in the .cpp); call before init() to override from the sketch.
+  void setExecDelays(uint16_t shortUs, uint16_t longMs);
+
   void clear();
   void home();
   void setCursor(uint8_t col, uint8_t row);
@@ -70,6 +74,8 @@ private:
   uint8_t _chip;           // controller the cursor currently sits on
   uint8_t _backlightBit;   // P3 held high while the backlight is on
   uint8_t _displaycontrol; // display/cursor/blink flags, mirrored for both chips
+  uint16_t _execShortUs;   // per-nibble settle (us), see setExecDelays()
+  uint16_t _execLongMs;    // clear/home wait (ms), see setExecDelays()
 };
 
 #endif // LIQUIDCRYSTALI2C_DUAL_H
