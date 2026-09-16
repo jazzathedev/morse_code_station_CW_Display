@@ -844,6 +844,15 @@ void scanControls()
 
 void decoderKeyDown()
 {
+  // The last letter was already committed to history but is still shown
+  // top-right. Clear it now so the new letter starts fresh, instead of
+  // clearing at commit time (which wipes it as soon as you stop keying).
+  // Mid-letter key-downs have letterPending still true, so they keep
+  // appending to the same pattern.
+  if (!letterPending && patternLen > 0)
+  {
+    clearActivity();
+  }
   keyDownStart = millis();
   lastKeyActivity = keyDownStart;
 }
@@ -882,7 +891,6 @@ void updateDecodeTiming()
   {
     pushHistory(packPattern(currentPattern));
     letterPending = false;
-    clearActivity();
     renderHistory();
   }
 }
