@@ -758,7 +758,7 @@ void setup()
   wirelessMode = (digitalRead(STATION_MODE_PIN) == LOW);
 #endif
   rawTextSwitch = digitalRead(TEXT_MODE_PIN);
-  textMode = (rawTextSwitch == LOW);
+  textMode = (rawTextSwitch == HIGH);
   lastTextSwitchChange = millis();
 
   Serial.println(wirelessMode ? F("Mode: WIRELESS") : F("Mode: DISPLAY"));
