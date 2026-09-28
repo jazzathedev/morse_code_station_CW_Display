@@ -67,7 +67,7 @@ as the current odd/even behaviour.
 Pin 6 (`MODE_SWITCH_PIN`) already exists but is currently disabled
 (`MODE_SWITCH_ENABLED 0`). Enable it so the pin selects raw dots/dashes vs
 decoded text. Read **once at boot** like the pair jumpers (no live toggling) -
-LOW (jumpered to GND) = decoded text, HIGH (unwired) = raw dots/dashes.
+LOW (jumpered to GND) = raw dots/dashes, HIGH (unwired) = decoded text.
 
 ## Free pins on the Nano
 

@@ -121,14 +121,15 @@ LiquidCrystalI2C_Dual lcd(LCD_I2C_ADDR, LCD_COLS, LCD_ROWS, 1);
 #define CONTENT_ROWS (LCD_ROWS - 1)
 
 // --- Pin map ---------------------------------------------------------------
-// Every input below is INPUT_PULLUP and active-low: open (or unwired) reads
-// HIGH and means idle/off, closed to GND reads LOW and means pressed/selected.
-// Nothing on this board is active-high and nothing needs an external resistor.
+// Every input below is INPUT_PULLUP: open (or unwired) reads HIGH, closed to
+// GND reads LOW. The key, clear, and station/pair pins are active-low; the
+// text-mode switch is active-high (HIGH = decoded text) so an unwired unit
+// defaults to CW TEXT. Nothing needs an external resistor.
 #define BUZZER_PIN 2
 #define KEY_PIN 3         // straight key                  LOW = key down
 #define CONFIRM_LED_PIN 4 // yellow: local keying
 #define STATUS_LED_PIN 5  // red: the remote unit's keying (wireless mode only)
-#define TEXT_MODE_PIN 6   // display style   LOW = decoded text, HIGH = raw
+#define TEXT_MODE_PIN 6   // display style   HIGH = decoded text, LOW = raw
 #define CLEAR_BUTTON 7    // soft restart                  LOW = pressed
 
 #if LCD_BACKEND == LCD_FAST_40X4
@@ -758,7 +759,7 @@ void setup()
   wirelessMode = (digitalRead(STATION_MODE_PIN) == LOW);
 #endif
   rawTextSwitch = digitalRead(TEXT_MODE_PIN);
-  textMode = (rawTextSwitch == LOW);
+  textMode = (rawTextSwitch == HIGH);
   lastTextSwitchChange = millis();
 
   Serial.println(wirelessMode ? F("Mode: WIRELESS") : F("Mode: DISPLAY"));
@@ -836,7 +837,7 @@ void scanControls()
     return;
   }
 
-  bool wanted = (reading == LOW);
+  bool wanted = (reading == HIGH);
   if (wanted != textMode)
   {
     textMode = wanted;
